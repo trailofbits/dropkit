@@ -604,7 +604,7 @@ def init(
 
 @app.command()
 def create(
-    name: str = typer.Argument(..., help="Name for the droplet"),
+    name: str | None = typer.Argument(None, help="Name for the droplet"),
     region: str | None = typer.Option(None, "--region", "-r", help="Region slug"),
     size: str | None = typer.Option(None, "--size", "-s", help="Droplet size slug"),
     image: str | None = typer.Option(None, "--image", "-i", help="Image slug"),
@@ -644,9 +644,55 @@ def create(
     # Create API client
     api = DigitalOceanAPI(token)
 
-    region = region or config.defaults.region
-    size = size or config.defaults.size
-    image = image or config.defaults.image
+    # Interactive mode: prompt for missing values
+    if name is None:
+        console.print("\n[bold cyan]Create New Droplet[/bold cyan]")
+        name = Prompt.ask("\n[bold]Droplet name[/bold]")
+
+    # Get region (interactive if not provided)
+    if region is None:
+        try:
+            available_regions = api.get_available_regions()
+            region = prompt_with_help(
+                "\n[bold]Region[/bold]",
+                default=config.defaults.region,
+                display_func=display_regions,
+                data=available_regions,
+            )
+        except DigitalOceanAPIError as e:
+            console.print(f"[yellow]Warning: Could not fetch regions: {e}[/yellow]")
+            console.print(f"[dim]Using default region: {config.defaults.region}[/dim]")
+            region = config.defaults.region
+
+    # Get size (interactive if not provided)
+    if size is None:
+        try:
+            available_sizes = api.get_available_sizes()
+            size = prompt_with_help(
+                "\n[bold]Size[/bold]",
+                default=config.defaults.size,
+                display_func=display_sizes,
+                data=available_sizes,
+            )
+        except DigitalOceanAPIError as e:
+            console.print(f"[yellow]Warning: Could not fetch sizes: {e}[/yellow]")
+            console.print(f"[dim]Using default size: {config.defaults.size}[/dim]")
+            size = config.defaults.size
+
+    # Get image (interactive if not provided)
+    if image is None:
+        try:
+            available_images = api.get_available_images()
+            image = prompt_with_help(
+                "\n[bold]Image[/bold]",
+                default=config.defaults.image,
+                display_func=display_images,
+                data=available_images,
+            )
+        except DigitalOceanAPIError as e:
+            console.print(f"[yellow]Warning: Could not fetch images: {e}[/yellow]")
+            console.print(f"[dim]Using default image: {config.defaults.image}[/dim]")
+            image = config.defaults.image
 
     # Get username for droplet (use flag if provided, otherwise fetch from DO API)
     try:

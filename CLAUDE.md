@@ -142,7 +142,8 @@ uv run tobcloud init
 uv run tobcloud init --force  # Overwrite existing config
 
 # Create a droplet
-uv run tobcloud create test-droplet
+uv run tobcloud create                    # Interactive mode - prompts for all values
+uv run tobcloud create test-droplet       # Specify name, uses defaults for rest
 uv run tobcloud create test-droplet --verbose  # Show debug output including cloud-init template
 uv run tobcloud create test-droplet --region sfo3 --size s-1vcpu-1gb
 uv run tobcloud create test-droplet --tags "production,webserver"  # Extends default tags
@@ -330,14 +331,16 @@ tags = config_manager.config.defaults.tags         # List[str]
   - Creates config with secure permissions
   - **Note**: Username is derived from DO account email, not configured
 
-- [x] `tobcloud create <name>` - Create droplet with cloud-init
+- [x] `tobcloud create [name]` - Create droplet with cloud-init
+  - **Interactive mode**: If name/region/size/image not provided, prompts interactively
+  - Uses `prompt_with_help()` with `?` for help (shows available regions/sizes/images)
   - Renders Jinja2 cloud-init template with username and SSH keys
   - Validates SSH keys before upload
   - Creates droplet via DigitalOcean API
   - Waits for droplet to become active
   - Automatically adds SSH config entry (uses hostname alias)
   - Waits for cloud-init completion (checks JSON status == "done")
-  - Supports custom region, size, image, user
+  - Supports custom region, size, image, user via CLI flags
   - `--verbose` flag shows debug output and rendered cloud-init
   - `--tags` extends default tags instead of replacing
 

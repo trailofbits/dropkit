@@ -54,6 +54,10 @@ This will validate your DigitalOcean API token, detect SSH keys, register them w
 ### 2. Create Your First Droplet
 
 ```bash
+# Interactive mode - prompts for name, region, size, image (type ? for help)
+tobcloud create
+
+# Or specify the name and use defaults
 tobcloud create my-first-droplet
 ```
 
