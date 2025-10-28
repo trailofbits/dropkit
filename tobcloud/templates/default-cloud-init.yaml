@@ -5,6 +5,13 @@ package_update: true
 package_upgrade: true
 disable_root_opts: no-port-forwarding,no-agent-forwarding,no-X11-forwarding
 
+apt:
+  sources:
+    docker:
+      keyid: 9DC858229FC7DD38854AE2D88D81803C0EBFCD88
+      keyserver: https://download.docker.com/linux/ubuntu/gpg
+      source: deb [arch=amd64 signed-by=$KEY_FILE] https://download.docker.com/linux/ubuntu $RELEASE stable
+
 # Install required packages
 packages:
   - ufw
@@ -15,13 +22,20 @@ packages:
   - build-essential
   - fontconfig
   - neovim
+  - apt-transport-https
+  - ca-certificates
+  - gnupg
+  - docker-ce
+  - docker-ce-cli
+  - containerd.io
+  - docker-buildx-plugin
+  - docker-compose-plugin
 
-# Create new user
 users:
   - name: {{ username }}
     gecos: "{{ username }} user"
     shell: /bin/bash
-    groups: sudo,admin,wheel
+    groups: sudo,admin,wheel,docker
     sudo: "ALL=(ALL) NOPASSWD:ALL"
     ssh_authorized_keys:{% for key in ssh_keys %}
       - {{ key }}
