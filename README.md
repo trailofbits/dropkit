@@ -39,6 +39,21 @@ uv tool install git+https://github.com/trailofbits/tobcloud.git
 
 This installs `tobcloud` as a global command-line tool.
 
+## Upgrading
+
+To upgrade to the latest version:
+
+```bash
+uv tool upgrade tobcloud
+```
+
+Or reinstall from the latest git version:
+
+```bash
+uv tool uninstall tobcloud
+uv tool install git+https://github.com/trailofbits/tobcloud.git
+```
+
 ## Quick Start
 
 ### 1. Initialize Configuration
@@ -91,6 +106,7 @@ Commands:
   list-ssh-keys    List SSH keys registered via tobcloud.
   add-ssh-key      Add or import an SSH public key to DigitalOcean.
   delete-ssh-key   Delete an SSH key registered via tobcloud.
+  version          Show the version of tobcloud.
 ```
 
 Use `tobcloud <command> --help` for detailed help on any command.

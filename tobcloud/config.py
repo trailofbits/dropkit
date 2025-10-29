@@ -106,6 +106,11 @@ class Config:
         return cls.CONFIG_FILE.exists()
 
     @classmethod
+    def get_config_dir(cls) -> Path:
+        """Get the config directory path."""
+        return cls.CONFIG_DIR
+
+    @classmethod
     def ensure_config_dir(cls) -> None:
         """Create config directory if it doesn't exist."""
         cls.CONFIG_DIR.mkdir(parents=True, exist_ok=True)

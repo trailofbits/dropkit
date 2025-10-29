@@ -17,12 +17,19 @@ from tobcloud.cloudinit import render_cloud_init
 from tobcloud.config import Config
 from tobcloud.ssh_config import add_ssh_host, host_exists, remove_ssh_host
 from tobcloud.ui import display_images, display_regions, display_sizes, prompt_with_help
+from tobcloud.version_check import check_for_updates
 
 app = typer.Typer(
     name="tobcloud",
     help="Manage DigitalOcean droplets for ToB engineers",
 )
 console = Console()
+
+
+@app.callback()
+def main_callback():
+    """Run before any command - checks for updates once per day."""
+    check_for_updates()
 
 
 # Helper functions
@@ -1967,6 +1974,14 @@ def delete_ssh_key_cmd(
     except DigitalOceanAPIError as e:
         console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(1)
+
+
+@app.command()
+def version():
+    """Show the version of tobcloud."""
+    from tobcloud import __version__
+
+    console.print(f"tobcloud version [cyan]{__version__}[/cyan]")
 
 
 def main():
