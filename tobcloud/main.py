@@ -701,16 +701,29 @@ def create(
             console.print(f"[dim]Using default image: {config.defaults.image}[/dim]")
             image = config.defaults.image
 
-    # Get username for droplet (use flag if provided, otherwise fetch from DO API)
+    # Get username, email, and full name for droplet (use flag if provided, otherwise fetch from DO API)
     try:
+        account = api.get_account()
+        email = account.get("email", "")
+        if not email:
+            console.print("[red]Error: No email found in DigitalOcean account[/red]")
+            raise typer.Exit(1)
+
         do_username = api.get_username()
     except DigitalOceanAPIError as e:
-        console.print(f"[red]Error fetching username from DigitalOcean: {e}[/red]")
+        console.print(f"[red]Error fetching account info from DigitalOcean: {e}[/red]")
         raise typer.Exit(1)
 
+    # Determine final username
     username = do_username if user is None else user
+
+    # Get full name from account (fallback to username if not available)
+    full_name = account.get("name", "") or username
+
     if verbose:
         console.print(f"[dim][DEBUG] Username: {username}[/dim]")
+        console.print(f"[dim][DEBUG] Full name: {full_name}[/dim]")
+        console.print(f"[dim][DEBUG] Email: {email}[/dim]")
 
     # Build tags list: mandatory tags + extra_tags from config + command-line tags
     extra_tags_list = list(config.defaults.extra_tags)  # Start with config tags
@@ -760,7 +773,7 @@ def create(
     # Render cloud-init
     try:
         console.print("[dim]Rendering cloud-init template...[/dim]")
-        user_data = render_cloud_init(template_path, username, ssh_keys)
+        user_data = render_cloud_init(template_path, username, full_name, email, ssh_keys)
 
         if verbose:
             console.print("\n[dim][DEBUG] Rendered cloud-init template:[/dim]")

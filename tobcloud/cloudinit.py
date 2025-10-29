@@ -10,6 +10,8 @@ from tobcloud.config import Config
 def render_cloud_init(
     template_path: str,
     username: str,
+    full_name: str,
+    email: str,
     ssh_keys: list[str],
 ) -> str:
     """
@@ -18,6 +20,8 @@ def render_cloud_init(
     Args:
         template_path: Path to the cloud-init template file
         username: Username to create in the droplet
+        full_name: Full name extracted from email (for git user.name)
+        email: Email address from DigitalOcean account (for git user.email)
         ssh_keys: List of SSH public key file paths
 
     Returns:
@@ -44,6 +48,8 @@ def render_cloud_init(
     template = Template(template_content)
     rendered = template.render(
         username=username,
+        full_name=full_name,
+        email=email,
         ssh_keys=ssh_key_contents,
     )
 

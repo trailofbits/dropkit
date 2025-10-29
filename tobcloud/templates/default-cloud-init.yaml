@@ -108,6 +108,10 @@ runcmd:
   - mkdir -p /home/{{ username }}
   - chown {{ username }}:{{ username }} /home/{{ username }}
 
+  # Configure git globally for the user
+  - su {{ username }} -c "git config --global user.name '{{ full_name }}'"
+  - su {{ username }} -c "git config --global user.email '{{ email }}'"
+
   # Install zprezto for user
   - su {{ username }} -c "zsh -c 'git clone --recursive https://github.com/sorin-ionescu/prezto.git /home/{{ username }}/.zprezto'"
 
