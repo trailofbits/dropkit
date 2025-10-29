@@ -86,6 +86,8 @@ Commands:
   info             Show detailed information about a droplet.
   destroy          Destroy a droplet (DESTRUCTIVE - requires confirmation).
   resize           Resize a droplet (causes downtime - requires power off).
+  on               Power on a droplet.
+  off              Power off a droplet (requires confirmation).
   list-ssh-keys    List SSH keys registered via tobcloud.
   add-ssh-key      Add or import an SSH public key to DigitalOcean.
   delete-ssh-key   Delete an SSH key registered via tobcloud.

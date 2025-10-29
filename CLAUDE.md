@@ -166,6 +166,10 @@ uv run tobcloud resize test-droplet                    # Interactive - prompts f
 uv run tobcloud resize test-droplet --size s-4vcpu-8gb  # With size specified
 uv run tobcloud resize test-droplet --size s-4vcpu-8gb --no-disk  # Without disk resize
 
+# Power on/off droplets
+uv run tobcloud on test-droplet   # Power on a droplet
+uv run tobcloud off test-droplet  # Power off a droplet (requires confirmation)
+
 # SSH key management
 uv run tobcloud list-ssh-keys                    # List registered SSH keys
 uv run tobcloud add-ssh-key ~/.ssh/id_ed25519.pub  # Add/import SSH key
@@ -416,6 +420,23 @@ tags = config_manager.config.defaults.tags         # List[str]
   - Polls action status until complete (10 minute timeout)
   - Shows success message with new size
 
+- [x] `tobcloud on <droplet-name>` - Power on a droplet
+  - Only allows powering on droplets tagged with `owner:<username>`
+  - Checks if droplet is already active (skips if yes)
+  - Shows current status before powering on
+  - Initiates power on action via DigitalOcean API
+  - Polls action status until complete (2 minute timeout)
+  - Shows success message
+
+- [x] `tobcloud off <droplet-name>` - Power off a droplet
+  - Only allows powering off droplets tagged with `owner:<username>`
+  - Checks if droplet is already off (skips if yes)
+  - Shows current status before powering off
+  - **Requires confirmation** before proceeding (yes/no, defaults to no)
+  - Initiates power off action via DigitalOcean API
+  - Polls action status until complete (2 minute timeout)
+  - Shows success message
+
 ## DigitalOcean API Endpoints
 
 Base URL: `https://api.digitalocean.com/v2`
@@ -445,6 +466,9 @@ Key endpoints:
 
 - **Never use `pip` - always use `uv`** for all Python operations
 - **Always run `./lint.sh`** before committing to ensure code quality
+- **Always update README.md** when adding new commands or major features
+  - Update the "Available Commands" section with new commands
+  - Keep README.md in sync with CLAUDE.md and actual functionality
 - Config files contain sensitive data (API tokens) - handle with care
 - Cloud-init template uses Jinja2 for variable substitution
 - **SSH Key Security**:

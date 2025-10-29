@@ -1568,6 +1568,158 @@ def resize(
         raise typer.Exit(1)
 
 
+@app.command()
+def on(droplet_name: str):
+    """
+    Power on a droplet.
+
+    Only droplets tagged with owner:<your-username> can be powered on.
+    """
+    try:
+        # Load config and API
+        config_manager, api = load_config_and_api()
+
+        # Find the droplet
+        console.print(f"[dim]Looking for droplet: [cyan]{droplet_name}[/cyan][/dim]\n")
+        droplet, username = find_user_droplet(api, droplet_name)
+
+        if not droplet or not username:
+            tag = get_user_tag(username) if username else "owner:<unknown>"
+            console.print(f"[red]Error: Droplet '{droplet_name}' not found with tag {tag}[/red]")
+            raise typer.Exit(1)
+
+        # Get droplet ID and status
+        droplet_id = droplet.get("id")
+        if not droplet_id:
+            console.print("[red]Error: Could not determine droplet ID[/red]")
+            raise typer.Exit(1)
+
+        status = droplet.get("status", "")
+
+        # Check if already active
+        if status == "active":
+            console.print(f"[yellow]Droplet '{droplet_name}' is already active[/yellow]")
+            raise typer.Exit(0)
+
+        # Show current status
+        console.print(
+            Panel.fit(
+                f"[bold cyan]POWER ON DROPLET: {droplet_name}[/bold cyan]",
+                border_style="cyan",
+            )
+        )
+        console.print(f"Current status: [yellow]{status}[/yellow]")
+        console.print()
+
+        # Power on
+        console.print("[dim]Powering on droplet...[/dim]")
+
+        action = api.power_on_droplet(droplet_id)
+        action_id = action.get("id")
+
+        if not action_id:
+            console.print("[red]Error: Failed to get action ID from API response[/red]")
+            raise typer.Exit(1)
+
+        console.print(f"[green]✓[/green] Power on action started (ID: [cyan]{action_id}[/cyan])")
+
+        # Wait for action to complete
+        console.print("[dim]Waiting for droplet to power on...[/dim]")
+
+        with console.status("[cyan]Powering on...[/cyan]"):
+            api.wait_for_action_complete(action_id, timeout=120)  # 2 minutes
+
+        console.print("[green]✓[/green] Droplet powered on successfully")
+        console.print()
+        console.print(f"[bold green]Droplet {droplet_name} is now active[/bold green]")
+
+    except DigitalOceanAPIError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
+
+
+@app.command()
+def off(droplet_name: str):
+    """
+    Power off a droplet (requires confirmation).
+
+    Only droplets tagged with owner:<your-username> can be powered off.
+    """
+    try:
+        # Load config and API
+        config_manager, api = load_config_and_api()
+
+        # Find the droplet
+        console.print(f"[dim]Looking for droplet: [cyan]{droplet_name}[/cyan][/dim]\n")
+        droplet, username = find_user_droplet(api, droplet_name)
+
+        if not droplet or not username:
+            tag = get_user_tag(username) if username else "owner:<unknown>"
+            console.print(f"[red]Error: Droplet '{droplet_name}' not found with tag {tag}[/red]")
+            raise typer.Exit(1)
+
+        # Get droplet ID and status
+        droplet_id = droplet.get("id")
+        if not droplet_id:
+            console.print("[red]Error: Could not determine droplet ID[/red]")
+            raise typer.Exit(1)
+
+        status = droplet.get("status", "")
+
+        # Check if already off
+        if status == "off":
+            console.print(f"[yellow]Droplet '{droplet_name}' is already powered off[/yellow]")
+            raise typer.Exit(0)
+
+        # Show current status
+        console.print(
+            Panel.fit(
+                f"[bold yellow]POWER OFF DROPLET: {droplet_name}[/bold yellow]",
+                border_style="yellow",
+            )
+        )
+        console.print(f"Current status: [green]{status}[/green]")
+        console.print()
+
+        # Confirmation
+        confirm = Prompt.ask(
+            "[yellow]Are you sure you want to power off this droplet?[/yellow]",
+            choices=["yes", "no"],
+            default="no",
+        )
+
+        if confirm != "yes":
+            console.print("[dim]Cancelled.[/dim]")
+            raise typer.Exit(0)
+
+        # Power off
+        console.print()
+        console.print("[dim]Powering off droplet...[/dim]")
+
+        action = api.power_off_droplet(droplet_id)
+        action_id = action.get("id")
+
+        if not action_id:
+            console.print("[red]Error: Failed to get action ID from API response[/red]")
+            raise typer.Exit(1)
+
+        console.print(f"[green]✓[/green] Power off action started (ID: [cyan]{action_id}[/cyan])")
+
+        # Wait for action to complete
+        console.print("[dim]Waiting for droplet to power off...[/dim]")
+
+        with console.status("[cyan]Powering off...[/cyan]"):
+            api.wait_for_action_complete(action_id, timeout=120)  # 2 minutes
+
+        console.print("[green]✓[/green] Droplet powered off successfully")
+        console.print()
+        console.print(f"[bold green]Droplet {droplet_name} is now off[/bold green]")
+
+    except DigitalOceanAPIError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
+
+
 @app.command(name="list-ssh-keys")
 def list_ssh_keys_cmd():
     """List SSH keys registered via tobcloud.

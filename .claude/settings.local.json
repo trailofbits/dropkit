@@ -6,7 +6,10 @@
       "Bash(uv add:*)",
       "Bash(uv run ruff:*)",
       "Bash(uv run mypy:*)",
-      "Bash(./lint.sh:*)"
+      "Bash(./lint.sh:*)",
+      "Bash(uv run tobcloud --help:*)",
+      "Bash(uv run tobcloud on --help:*)",
+      "Bash(uv run tobcloud off --help:*)"
     ],
     "deny": [],
     "ask": []

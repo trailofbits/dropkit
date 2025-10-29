@@ -450,6 +450,40 @@ class DigitalOceanAPI:
         response = self._request("POST", f"/droplets/{droplet_id}/actions", json=payload)
         return response.get("action", {})
 
+    def power_on_droplet(self, droplet_id: int) -> dict[str, Any]:
+        """
+        Power on a droplet.
+
+        Args:
+            droplet_id: Droplet ID
+
+        Returns:
+            Action object with id, status, etc.
+
+        Raises:
+            DigitalOceanAPIError: If power on fails
+        """
+        payload = {"type": "power_on"}
+        response = self._request("POST", f"/droplets/{droplet_id}/actions", json=payload)
+        return response.get("action", {})
+
+    def power_off_droplet(self, droplet_id: int) -> dict[str, Any]:
+        """
+        Power off a droplet.
+
+        Args:
+            droplet_id: Droplet ID
+
+        Returns:
+            Action object with id, status, etc.
+
+        Raises:
+            DigitalOceanAPIError: If power off fails
+        """
+        payload = {"type": "power_off"}
+        response = self._request("POST", f"/droplets/{droplet_id}/actions", json=payload)
+        return response.get("action", {})
+
     def get_action(self, action_id: int) -> dict[str, Any]:
         """
         Get action status by ID.
