@@ -6,5 +6,8 @@ dist/
 wheels/
 *.egg-info
 
+# Build-generated version file
+tobcloud/_version.txt
+
 # Virtual environments
 .venv

@@ -10,7 +10,8 @@ def _get_version() -> str:
 
     Returns:
         - "dev" if running from git repository (development mode)
-        - "0.1.0+git.<commit>" if installed (commit hash embedded at build time or computed)
+        - "0.1.0+git.<commit>" if installed (commit hash embedded at build time)
+        - "0.1.0" fallback if version cannot be determined
     """
     # Check if we're in a git repository (development mode)
     try:
@@ -20,7 +21,17 @@ def _get_version() -> str:
     except Exception:
         pass
 
-    # Installed mode - try to get commit from git describe
+    # Installed mode - check for embedded version file (created at build time)
+    try:
+        version_file = Path(__file__).parent / "_version.txt"
+        if version_file.exists():
+            commit = version_file.read_text().strip()
+            if commit:
+                return f"0.1.0+git.{commit}"
+    except Exception:
+        pass
+
+    # Fallback: try to get commit from git (in case running from source)
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--short=7", "HEAD"],
@@ -36,7 +47,7 @@ def _get_version() -> str:
     except Exception:
         pass
 
-    # Fallback to base version
+    # Final fallback to base version
     return "0.1.0"
 
 
