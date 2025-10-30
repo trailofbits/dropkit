@@ -40,7 +40,9 @@ class DefaultsConfig(BaseModel):
 class CloudInitConfig(BaseModel):
     """Cloud-init configuration."""
 
-    template_path: str = Field(..., description="Path to cloud-init template")
+    template_path: str | None = Field(
+        default=None, description="Path to cloud-init template (None = use package default)"
+    )
     ssh_keys: list[str] = Field(..., min_length=1, description="SSH public key paths")
     ssh_key_ids: list[int] = Field(
         ..., min_length=1, description="DigitalOcean SSH key IDs for root access"
@@ -109,6 +111,11 @@ class Config:
     def get_config_dir(cls) -> Path:
         """Get the config directory path."""
         return cls.CONFIG_DIR
+
+    @staticmethod
+    def get_default_template_path() -> Path:
+        """Get the default cloud-init template path from package."""
+        return Path(__file__).parent / "templates" / "default-cloud-init.yaml"
 
     @classmethod
     def ensure_config_dir(cls) -> None:
@@ -310,7 +317,6 @@ class Config:
                 extra_tags=extra_tags,
             ),
             cloudinit=CloudInitConfig(
-                template_path=str(self.CLOUD_INIT_FILE),
                 ssh_keys=ssh_keys,
                 ssh_key_ids=ssh_key_ids,
             ),

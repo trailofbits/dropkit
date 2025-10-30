@@ -1,7 +1,6 @@
 """Main CLI application for tobcloud."""
 
 import json
-import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -575,13 +574,6 @@ def init(
 
     console.print(f"\n[green]✓[/green] Saved configuration to [cyan]{Config.CONFIG_FILE}[/cyan]")
 
-    # Copy cloud-init template
-    template_src = Path(__file__).parent / "templates" / "default-cloud-init.yaml"
-    template_dst = Config.CLOUD_INIT_FILE
-
-    shutil.copy(template_src, template_dst)
-    console.print(f"[green]✓[/green] Copied cloud-init template to [cyan]{template_dst}[/cyan]")
-
     # Show summary
     console.print("\n[bold green]Configuration complete![/bold green]")
     console.print("\n[bold]Summary:[/bold]")
@@ -605,8 +597,10 @@ def init(
     console.print(table)
 
     console.print("\n[bold]Next steps:[/bold]")
-    console.print("  • Edit cloud-init template: [cyan]" + str(template_dst) + "[/cyan]")
     console.print("  • Create a droplet: [cyan]tobcloud create <name>[/cyan]")
+    console.print(
+        "  • Customize cloud-init template (optional): copy from package and set template_path in config"
+    )
 
 
 @app.command()
@@ -743,11 +737,16 @@ def create(
     if verbose:
         console.print(f"[dim][DEBUG] SSH keys: {ssh_keys}[/dim]")
 
-    # Get cloud-init template path
-    template_path = config.cloudinit.template_path
+    # Get cloud-init template path (use package default if not specified)
+    template_path = (
+        config.cloudinit.template_path
+        if config.cloudinit.template_path
+        else str(config_manager.get_default_template_path())
+    )
 
     if verbose:
-        console.print(f"[dim][DEBUG] Cloud-init template: {template_path}[/dim]")
+        source = "custom" if config.cloudinit.template_path else "package default"
+        console.print(f"[dim][DEBUG] Cloud-init template ({source}): {template_path}[/dim]")
 
     console.print(
         Panel.fit(
