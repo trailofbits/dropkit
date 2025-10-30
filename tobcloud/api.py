@@ -96,6 +96,21 @@ class DigitalOceanAPI:
 
         return username
 
+    @staticmethod
+    def _validate_positive_int(value: int, name: str) -> None:
+        """
+        Validate that an integer ID is positive.
+
+        Args:
+            value: The integer to validate
+            name: Name of the parameter (for error message)
+
+        Raises:
+            ValueError: If the value is not positive
+        """
+        if value <= 0:
+            raise ValueError(f"{name} must be a positive integer, got: {value}")
+
     def _request(
         self,
         method: str,
@@ -131,6 +146,8 @@ class DigitalOceanAPI:
         endpoint: str,
         key: str,
         per_page: int = 200,
+        extra_params: dict[str, str] | None = None,
+        max_pages: int = 1000,
     ) -> list[dict[str, Any]]:
         """
         Fetch all pages of a paginated API endpoint.
@@ -139,15 +156,24 @@ class DigitalOceanAPI:
             endpoint: API endpoint to fetch
             key: Key in response containing the items (e.g., 'regions', 'sizes')
             per_page: Number of items per page (default 200, max 200)
+            extra_params: Additional query parameters to include (safely encoded)
+            max_pages: Maximum number of pages to fetch (default 1000, prevents DoS)
 
         Returns:
             List of all items across all pages
+
+        Raises:
+            DigitalOceanAPIError: If max_pages limit is reached
         """
         all_items = []
         page = 1
 
         while True:
-            params = {"page": page, "per_page": per_page}
+            # Build params dict safely
+            params: dict[str, str | int] = {"page": page, "per_page": per_page}
+            if extra_params:
+                params.update(extra_params)
+
             response = self._request("GET", endpoint, params=params)
 
             items = response.get(key, [])
@@ -160,6 +186,13 @@ class DigitalOceanAPI:
             # If there's no "next" link, we're done
             if "next" not in pages:
                 break
+
+            # Safety: prevent infinite pagination
+            if page >= max_pages:
+                raise DigitalOceanAPIError(
+                    f"Pagination limit reached: {max_pages} pages. "
+                    "This may indicate an API issue or misconfiguration."
+                )
 
             page += 1
 
@@ -206,7 +239,8 @@ class DigitalOceanAPI:
         if image_type == "all":
             return self._get_paginated("/images", "images")
         else:
-            return self._get_paginated(f"/images?type={image_type}", "images")
+            # Use extra_params to safely pass query parameters
+            return self._get_paginated("/images", "images", extra_params={"type": image_type})
 
     def get_available_images(self, image_type: str = "distribution") -> list[dict[str, Any]]:
         """
@@ -273,7 +307,11 @@ class DigitalOceanAPI:
 
         Returns:
             Droplet object
+
+        Raises:
+            ValueError: If droplet_id is not positive
         """
+        self._validate_positive_int(droplet_id, "droplet_id")
         response = self._request("GET", f"/droplets/{droplet_id}")
         return response.get("droplet", {})
 
@@ -288,8 +326,8 @@ class DigitalOceanAPI:
             List of droplet objects
         """
         if tag_name:
-            # Use tag-based filtering
-            return self._get_paginated(f"/droplets?tag_name={tag_name}", "droplets")
+            # Use tag-based filtering with safe parameter encoding
+            return self._get_paginated("/droplets", "droplets", extra_params={"tag_name": tag_name})
         else:
             # Get all droplets
             return self._get_paginated("/droplets", "droplets")
@@ -312,10 +350,12 @@ class DigitalOceanAPI:
             Final droplet object
 
         Raises:
+            ValueError: If droplet_id is not positive
             DigitalOceanAPIError: If timeout is reached or droplet enters error state
         """
         import time
 
+        self._validate_positive_int(droplet_id, "droplet_id")
         start_time = time.time()
 
         while True:
@@ -396,8 +436,10 @@ class DigitalOceanAPI:
             Updated SSH key object from API response
 
         Raises:
+            ValueError: If key_id is not positive
             DigitalOceanAPIError: If update fails
         """
+        self._validate_positive_int(key_id, "key_id")
         payload = {"name": name}
         response = self._request("PUT", f"/account/keys/{key_id}", json=payload)
         return response.get("ssh_key", {})
@@ -410,8 +452,10 @@ class DigitalOceanAPI:
             key_id: The SSH key ID to delete
 
         Raises:
+            ValueError: If key_id is not positive
             DigitalOceanAPIError: If deletion fails
         """
+        self._validate_positive_int(key_id, "key_id")
         self._request("DELETE", f"/account/keys/{key_id}")
 
     def delete_droplet(self, droplet_id: int) -> None:
@@ -422,8 +466,10 @@ class DigitalOceanAPI:
             droplet_id: Droplet ID to delete
 
         Raises:
+            ValueError: If droplet_id is not positive
             DigitalOceanAPIError: If deletion fails
         """
+        self._validate_positive_int(droplet_id, "droplet_id")
         self._request("DELETE", f"/droplets/{droplet_id}")
 
     def resize_droplet(self, droplet_id: int, size: str, disk: bool = True) -> dict[str, Any]:
@@ -439,8 +485,10 @@ class DigitalOceanAPI:
             Action object with id, status, etc.
 
         Raises:
+            ValueError: If droplet_id is not positive
             DigitalOceanAPIError: If resize fails
         """
+        self._validate_positive_int(droplet_id, "droplet_id")
         payload = {
             "type": "resize",
             "size": size,
@@ -461,8 +509,10 @@ class DigitalOceanAPI:
             Action object with id, status, etc.
 
         Raises:
+            ValueError: If droplet_id is not positive
             DigitalOceanAPIError: If power on fails
         """
+        self._validate_positive_int(droplet_id, "droplet_id")
         payload = {"type": "power_on"}
         response = self._request("POST", f"/droplets/{droplet_id}/actions", json=payload)
         return response.get("action", {})
@@ -478,8 +528,10 @@ class DigitalOceanAPI:
             Action object with id, status, etc.
 
         Raises:
+            ValueError: If droplet_id is not positive
             DigitalOceanAPIError: If power off fails
         """
+        self._validate_positive_int(droplet_id, "droplet_id")
         payload = {"type": "power_off"}
         response = self._request("POST", f"/droplets/{droplet_id}/actions", json=payload)
         return response.get("action", {})
@@ -495,8 +547,10 @@ class DigitalOceanAPI:
             Action object with id, status, type, etc.
 
         Raises:
+            ValueError: If action_id is not positive
             DigitalOceanAPIError: If request fails
         """
+        self._validate_positive_int(action_id, "action_id")
         response = self._request("GET", f"/actions/{action_id}")
         return response.get("action", {})
 
@@ -518,10 +572,12 @@ class DigitalOceanAPI:
             Final action object
 
         Raises:
+            ValueError: If action_id is not positive
             DigitalOceanAPIError: If timeout is reached or action enters error state
         """
         import time
 
+        self._validate_positive_int(action_id, "action_id")
         start_time = time.time()
 
         while True:
