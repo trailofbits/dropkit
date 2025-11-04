@@ -34,7 +34,9 @@ brew install uv
 ### Install tobcloud
 
 ```bash
+# Based on what you have configured on your machine, use one or the other, so you do not have to insert any username/password
 uv tool install git+https://github.com/trailofbits/tobcloud.git
+uv tool install git+ssh://git@github.com/trailofbits/tobcloud.git
 ```
 
 This installs `tobcloud` as a global command-line tool.
@@ -121,12 +123,14 @@ Configuration files are stored in `~/.config/tobcloud/`:
 ### Default Tags
 
 All droplets are automatically tagged with:
+
 - `owner:<username>` - Your DigitalOcean account username (derived from email)
 - `firewall` - For security group identification
 
 ### SSH Hostname Convention
 
 All SSH config entries use the prefix `tobcloud.<droplet-name>`:
+
 - Connect with: `ssh tobcloud.my-droplet`
 
 ### Cloud-Init Customization
@@ -138,6 +142,7 @@ Edit `~/.config/tobcloud/cloud-init.yaml` to customize user setup, package insta
 ### "Config not found. Run 'tobcloud init' first"
 
 Initialize the configuration:
+
 ```bash
 tobcloud init
 ```
@@ -145,12 +150,14 @@ tobcloud init
 ### Cloud-init failed or timeout
 
 Check cloud-init status manually:
+
 ```bash
 ssh tobcloud.my-droplet 'sudo cloud-init status'
 ssh tobcloud.my-droplet 'sudo cat /var/log/cloud-init.log'
 ```
 
 Use `--verbose` flag to see detailed output:
+
 ```bash
 tobcloud create my-droplet --verbose
 ```
@@ -158,6 +165,7 @@ tobcloud create my-droplet --verbose
 ### "Droplet not found with tag owner:<username>"
 
 The droplet might belong to someone else. List your droplets:
+
 ```bash
 tobcloud list
 ```
