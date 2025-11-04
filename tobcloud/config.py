@@ -35,6 +35,10 @@ class DefaultsConfig(BaseModel):
         default_factory=list,
         description="Extra tags (in addition to mandatory owner:<username> and firewall tags)",
     )
+    project_id: str | None = Field(
+        default=None,
+        description="Default project ID (UUID) for new droplets",
+    )
 
 
 class CloudInitConfig(BaseModel):
@@ -285,6 +289,7 @@ class Config:
         ssh_keys: list[str] | None = None,
         ssh_key_ids: list[int] | None = None,
         extra_tags: list[str] | None = None,
+        project_id: str | None = None,
     ) -> None:
         """Create a default configuration with validation.
 
@@ -315,6 +320,7 @@ class Config:
                 size=size,
                 image=image,
                 extra_tags=extra_tags,
+                project_id=project_id,
             ),
             cloudinit=CloudInitConfig(
                 ssh_keys=ssh_keys,

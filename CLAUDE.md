@@ -285,12 +285,14 @@ username = Config.sanitize_email_for_username("john.doe@trailofbits.com")
    The codebase uses helper functions to eliminate duplication and centralize logic:
    - `load_config_and_api()` - Loads configuration and creates API client (used by all commands)
    - `find_user_droplet()` - Finds droplet by name with user tag filtering
+   - `find_project_by_name_or_id()` - Resolves project name or UUID to (id, name) tuple
    - `get_ssh_hostname()` - Converts droplet name to SSH hostname (`tobcloud.<name>`)
    - `get_user_tag()` - Generates user tag (`owner:<username>`)
    - `build_droplet_tags()` - Builds complete tag list with mandatory + extra tags
    - `register_ssh_keys_with_do()` - Handles SSH key detection, validation, and registration (~120 lines)
    - `wait_for_cloud_init()` - Polls cloud-init status via SSH (~159 lines)
    - `complete_droplet_name()` - Shell completion function for droplet names
+   - `complete_project_name()` - Shell completion function for project names
 
    **Benefits**: Single source of truth, easier maintenance, reduced code duplication
 
@@ -308,6 +310,36 @@ username = Config.sanitize_email_for_username("john.doe@trailofbits.com")
    - Returns `list[str]` of matching droplet names
    - Connected to arguments via `autocompletion=complete_droplet_name` parameter
    - Typer/Click handle shell integration automatically
+
+12. **Project Assignment**:
+   - Droplets can be assigned to DigitalOcean projects for organization
+   - Optional default project can be set in config (`defaults.project_id` stores UUID)
+   - Override per-droplet using `--project` flag on `tobcloud create` (accepts name or UUID)
+   - Project assignment happens after droplet becomes active
+   - Uses DigitalOcean Projects API:
+     - `GET /v2/projects` - List available projects
+     - `POST /v2/projects/{project_id}/resources` - Assign droplet to project
+     - Resource URN format: `do:droplet:{droplet_id}`
+   - Graceful degradation: If project assignment fails, droplet creation continues
+   - `display_projects()` UI function shows project table (ID, name, purpose, description)
+
+   **Implementation details**:
+   - `api.list_projects()` - Fetch all projects (paginated, used for listing/search)
+   - `api.get_project(project_id)` - Get specific project by UUID (efficient, returns None if 404)
+   - `api.get_default_project()` - Get default project (returns None if no default)
+   - `api.assign_resources_to_project(project_id, [urn])` - Assign droplet to project
+   - `api.get_droplet_urn(droplet_id)` - Generate URN for droplet
+   - `find_project_by_name_or_id(api, name_or_id)` - Resolve project name or UUID to (id, name)
+     - **Optimized**: If input looks like UUID (36 chars, 4 hyphens), uses `get_project()` directly
+     - Only lists all projects if searching by name (case-insensitive)
+   - `complete_project_name(incomplete)` - Shell completion for project names
+   - Project UUID stored in `DefaultsConfig.project_id` (config stores UUID for stability)
+   - Init command:
+     - Fetches and displays DigitalOcean default project if available
+     - Offers default project name as prompt default
+     - Prompts for project name or ID (optional, with `?` for help)
+   - Create command accepts project name or UUID via `--project` flag (with autocompletion)
+   - Name resolution is case-insensitive, matches by name first
 
 ### Pydantic Configuration Models
 
@@ -475,6 +507,10 @@ Key endpoints:
 - `POST /v2/account/keys` - Add new SSH key
 - `PUT /v2/account/keys/{id}` - Update SSH key name
 - `DELETE /v2/account/keys/{id}` - Delete SSH key
+- `GET /v2/projects` - List all projects (paginated)
+- `GET /v2/projects/{project_id}` - Get a specific project by UUID
+- `GET /v2/projects/default` - Get the default project for the account
+- `POST /v2/projects/{project_id}/resources` - Assign resources to a project (body: `{"resources": ["do:droplet:12345"]}`)
 
 **Pagination**: The API uses pagination with `page` and `per_page` query parameters (max 200/page). The `api.py` module automatically handles pagination by following the `links.pages.next` URLs until all results are fetched.
 

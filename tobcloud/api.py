@@ -598,3 +598,86 @@ class DigitalOceanAPI:
                 )
 
             time.sleep(poll_interval)
+
+    def list_projects(self) -> list[dict[str, Any]]:
+        """
+        List all projects in the account.
+
+        Returns:
+            List of project objects with id, name, description, purpose, etc.
+        """
+        return self._get_paginated("/projects", "projects")
+
+    def get_project(self, project_id: str) -> dict[str, Any] | None:
+        """
+        Get a specific project by ID.
+
+        Args:
+            project_id: Project UUID
+
+        Returns:
+            Project object if found, None if not found (404)
+
+        Raises:
+            DigitalOceanAPIError: If request fails (non-404 errors)
+        """
+        try:
+            response = self._request("GET", f"/projects/{project_id}")
+            return response.get("project", {})
+        except DigitalOceanAPIError as e:
+            # 404 means project doesn't exist
+            if e.status_code == 404:
+                return None
+            raise
+
+    def get_default_project(self) -> dict[str, Any] | None:
+        """
+        Get the default project for the account.
+
+        Returns:
+            Project object if default project exists, None if not found
+
+        Raises:
+            DigitalOceanAPIError: If request fails (non-404 errors)
+        """
+        try:
+            response = self._request("GET", "/projects/default")
+            return response.get("project", {})
+        except DigitalOceanAPIError as e:
+            # 404 means no default project
+            if e.status_code == 404:
+                return None
+            raise
+
+    def assign_resources_to_project(
+        self, project_id: str, resource_urns: list[str]
+    ) -> dict[str, Any]:
+        """
+        Assign resources to a project.
+
+        Args:
+            project_id: Project UUID
+            resource_urns: List of resource URNs (e.g., ["do:droplet:12345"])
+
+        Returns:
+            Response with assigned resources
+
+        Raises:
+            DigitalOceanAPIError: If assignment fails
+        """
+        payload = {"resources": resource_urns}
+        response = self._request("POST", f"/projects/{project_id}/resources", json=payload)
+        return response
+
+    @staticmethod
+    def get_droplet_urn(droplet_id: int) -> str:
+        """
+        Get the URN (Uniform Resource Name) for a droplet.
+
+        Args:
+            droplet_id: Droplet ID
+
+        Returns:
+            URN string in format "do:droplet:{id}"
+        """
+        return f"do:droplet:{droplet_id}"

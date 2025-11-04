@@ -82,6 +82,32 @@ def display_images(images: list[dict[str, Any]]) -> None:
     console.print(table)
 
 
+def display_projects(projects: list[dict[str, Any]]) -> None:
+    """Display available projects in a table, sorted alphabetically by name."""
+    table = Table(title="Available Projects", show_header=True)
+    table.add_column("ID", style="dim", no_wrap=True)
+    table.add_column("Name", style="cyan")
+    table.add_column("Purpose", style="white")
+    table.add_column("Description", style="dim")
+
+    # Sort projects alphabetically by name
+    sorted_projects = sorted(projects, key=lambda p: p.get("name", "").lower())
+
+    for project in sorted_projects:
+        project_id = project.get("id", "")
+        name = project.get("name", "")
+        purpose = project.get("purpose", "")
+        description = project.get("description", "")
+
+        # Truncate description if too long
+        if len(description) > 50:
+            description = description[:47] + "..."
+
+        table.add_row(project_id, name, purpose, description)
+
+    console.print(table)
+
+
 def prompt_with_help(
     prompt_text: str,
     default: str,

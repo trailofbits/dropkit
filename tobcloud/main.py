@@ -15,7 +15,13 @@ from tobcloud.api import DigitalOceanAPI, DigitalOceanAPIError
 from tobcloud.cloudinit import render_cloud_init
 from tobcloud.config import Config
 from tobcloud.ssh_config import add_ssh_host, host_exists, remove_ssh_host
-from tobcloud.ui import display_images, display_regions, display_sizes, prompt_with_help
+from tobcloud.ui import (
+    display_images,
+    display_projects,
+    display_regions,
+    display_sizes,
+    prompt_with_help,
+)
 from tobcloud.version_check import check_for_updates
 
 app = typer.Typer(
@@ -73,6 +79,48 @@ def complete_droplet_name(incomplete: str) -> list[str]:
             ]
 
         return droplet_names
+    except Exception:
+        # Silently fail on errors - completion should never break the CLI
+        return []
+
+
+def complete_project_name(incomplete: str) -> list[str]:
+    """
+    Autocompletion function for project names.
+
+    Fetches project names from DigitalOcean.
+    This is used by Typer for shell completion (e.g., bash, zsh).
+
+    Args:
+        incomplete: Partial text entered by the user
+
+    Returns:
+        List of matching project names
+    """
+    try:
+        # Check if config exists
+        if not Config.exists():
+            return []
+
+        # Load config and create API client
+        config_manager = Config()
+        config_manager.load()
+        config = config_manager.config
+        api = DigitalOceanAPI(config.digitalocean.token)
+
+        # Fetch all projects
+        projects = api.list_projects()
+
+        # Extract project names
+        project_names = [p.get("name", "") for p in projects if p.get("name")]
+
+        # Filter by incomplete text (case-insensitive)
+        if incomplete:
+            project_names = [
+                name for name in project_names if name.lower().startswith(incomplete.lower())
+            ]
+
+        return project_names
     except Exception:
         # Silently fail on errors - completion should never break the CLI
         return []
@@ -481,6 +529,46 @@ def find_user_droplet(api: DigitalOceanAPI, droplet_name: str) -> tuple[dict | N
     return None, None
 
 
+def find_project_by_name_or_id(
+    api: DigitalOceanAPI, name_or_id: str
+) -> tuple[str | None, str | None]:
+    """
+    Find a project by name or UUID.
+
+    Optimized to use direct API call for UUIDs, only lists all projects for name search.
+
+    Args:
+        api: DigitalOceanAPI instance
+        name_or_id: Project name or UUID
+
+    Returns:
+        Tuple of (project_id, project_name) if found, (None, None) otherwise
+    """
+    # Check if input looks like a UUID (36 chars with hyphens at positions 8, 13, 18, 23)
+    if len(name_or_id) == 36 and name_or_id.count("-") == 4:
+        # Try direct API call for UUID (more efficient than listing all)
+        try:
+            project = api.get_project(name_or_id)
+            if project:
+                return project.get("id"), project.get("name")
+        except DigitalOceanAPIError:
+            # If direct lookup fails, fall through to name search
+            pass
+
+    # Not a UUID or UUID lookup failed - search by name
+    try:
+        projects = api.list_projects()
+    except DigitalOceanAPIError:
+        return None, None
+
+    # Try exact name match (case-insensitive)
+    for project in projects:
+        if project.get("name", "").lower() == name_or_id.lower():
+            return project.get("id"), project.get("name")
+
+    return None, None
+
+
 @app.command()
 def init(
     force: bool = typer.Option(
@@ -602,6 +690,52 @@ def init(
     if extra_tags_input.strip():
         extra_tags = [t.strip() for t in extra_tags_input.split(",") if t.strip()]
 
+    # Prompt for default project (optional)
+    console.print("\n[bold]Default Project (optional)[/bold]")
+    console.print("[dim]You can assign new droplets to a specific project by default[/dim]")
+
+    project_id = None
+    default_project_name = None
+
+    try:
+        # Try to get the default project
+        default_project = api.get_default_project()
+        if default_project:
+            default_project_name = default_project.get("name", "")
+            console.print(
+                f"[dim]Your DigitalOcean default project: [cyan]{default_project_name}[/cyan][/dim]"
+            )
+
+        # Fetch all projects for help display
+        projects = api.list_projects()
+        if projects:
+            console.print(f"[dim]Found {len(projects)} project(s)[/dim]")
+
+            # Offer default project name as the default choice
+            prompt_default = default_project_name if default_project_name else ""
+
+            use_project = prompt_with_help(
+                "Default project name or ID (? for help, or press Enter to skip)",
+                default=prompt_default,
+                display_func=display_projects,
+                data=projects,
+            )
+
+            if use_project.strip():
+                # Resolve project name or ID to UUID (config stores UUID)
+                resolved_id, resolved_name = find_project_by_name_or_id(api, use_project)
+                if resolved_id:
+                    project_id = resolved_id
+                    console.print(f"[green]✓[/green] Default project: [cyan]{resolved_name}[/cyan]")
+                else:
+                    console.print(f"[yellow]⚠[/yellow] Project '{use_project}' not found[/yellow]")
+                    console.print("[dim]Skipping default project[/dim]")
+        else:
+            console.print("[dim]No projects found in your account[/dim]")
+    except DigitalOceanAPIError as e:
+        console.print(f"[yellow]⚠[/yellow] Could not fetch projects: {e}")
+        console.print("[dim]Skipping default project[/dim]")
+
     # Create config
     config = Config()
     config.create_default_config(
@@ -613,6 +747,7 @@ def init(
         ssh_keys=ssh_keys,
         ssh_key_ids=ssh_key_ids,
         extra_tags=extra_tags,
+        project_id=project_id,
     )
     config.save()
 
@@ -636,6 +771,16 @@ def init(
     )
     if config.config.defaults.extra_tags:
         table.add_row("Extra tags:", ", ".join(config.config.defaults.extra_tags))
+    if project_id:
+        # Try to get project name for display
+        try:
+            projects_list = api.list_projects()
+            project_obj = next((p for p in projects_list if p.get("id") == project_id), None)
+            if project_obj:
+                table.add_row("Default project:", project_obj.get("name", project_id))
+        except Exception:
+            # If we can't get the name, just show the ID
+            table.add_row("Default project:", project_id)
     table.add_row("SSH keys:", f"{len(ssh_keys)} key(s)")
 
     console.print(table)
@@ -657,6 +802,13 @@ def create(
         None, "--tags", "-t", help="Comma-separated tags (extends default tags)"
     ),
     user: str | None = typer.Option(None, "--user", "-u", help="Username to create"),
+    project: str | None = typer.Option(
+        None,
+        "--project",
+        "-p",
+        help="Project name or ID to assign droplet to",
+        autocompletion=complete_project_name,
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show verbose debug output"),
 ) -> None:
     """
@@ -739,6 +891,24 @@ def create(
             console.print(f"[dim]Using default image: {config.defaults.image}[/dim]")
             image = config.defaults.image
 
+    # Get project (use flag if provided, otherwise use config default or skip)
+    # The parameter can be a name or UUID; config always stores UUID
+    project_input = project if project is not None else config.defaults.project_id
+    project_id = None
+    project_name = None
+
+    if project_input:
+        # Resolve project name or UUID to get both ID and name
+        resolved_id, resolved_name = find_project_by_name_or_id(api, project_input)
+        if resolved_id:
+            project_id = resolved_id
+            project_name = resolved_name
+            if verbose:
+                console.print(f"[dim][DEBUG] Project: {project_name} ({project_id})[/dim]")
+        else:
+            console.print(f"[yellow]Warning: Project '{project_input}' not found[/yellow]")
+            console.print("[yellow]Droplet will be created without project assignment[/yellow]")
+
     # Get username, email, and full name for droplet (use flag if provided, otherwise fetch from DO API)
     try:
         account = api.get_account()
@@ -809,6 +979,8 @@ def create(
     table.add_row("Image:", image)
     table.add_row("User:", username)
     table.add_row("Tags:", ", ".join(tags_list))
+    if project_id and project_name:
+        table.add_row("Project:", project_name)
 
     console.print(table)
     console.print()
@@ -869,6 +1041,16 @@ def create(
             console.print(
                 f"[dim][DEBUG] Active droplet networks: {active_droplet.get('networks')}[/dim]"
             )
+
+        # Assign droplet to project if specified
+        if project_id:
+            try:
+                console.print(f"[dim]Assigning droplet to project '{project_name}'...[/dim]")
+                droplet_urn = api.get_droplet_urn(droplet_id)
+                api.assign_resources_to_project(project_id, [droplet_urn])
+                console.print(f"[green]✓[/green] Assigned to project: [cyan]{project_name}[/cyan]")
+            except DigitalOceanAPIError as e:
+                console.print(f"[yellow]⚠[/yellow] Could not assign to project: {e}")
 
         # Get IP address
         networks = active_droplet.get("networks", {})

@@ -76,6 +76,9 @@ tobcloud create
 
 # Or specify the name and use defaults
 tobcloud create my-first-droplet
+
+# Assign to a specific project (by name or ID)
+tobcloud create my-droplet --project "My Project"
 ```
 
 The tool will create the droplet, wait for it to become active, add SSH configuration automatically, and wait for cloud-init to complete.
@@ -126,6 +129,19 @@ All droplets are automatically tagged with:
 
 - `owner:<username>` - Your DigitalOcean account username (derived from email)
 - `firewall` - For security group identification
+
+### Projects
+
+Organize your droplets into DigitalOcean projects:
+
+- **Set default project** during `tobcloud init` - all new droplets will be assigned to this project
+  - The init wizard will suggest your DigitalOcean default project if you have one
+  - Just press Enter to accept it, or type a different project name/ID
+- **Override per-droplet** using `--project <name>` flag with `tobcloud create`
+- Project assignment happens automatically after droplet creation
+- **Tab completion** available for project names when using shell completion
+
+You can specify projects by name (e.g., `--project "My Project"`) or by UUID. Type `?` during the init wizard to see all available projects.
 
 ### SSH Hostname Convention
 
