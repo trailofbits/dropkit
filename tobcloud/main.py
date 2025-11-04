@@ -34,6 +34,50 @@ def main_callback():
 # Helper functions
 
 
+def complete_droplet_name(incomplete: str) -> list[str]:
+    """
+    Autocompletion function for droplet names.
+
+    Fetches droplet names from DigitalOcean for the current user.
+    This is used by Typer for shell completion (e.g., bash, zsh).
+
+    Args:
+        incomplete: Partial text entered by the user
+
+    Returns:
+        List of matching droplet names
+    """
+    try:
+        # Check if config exists
+        if not Config.exists():
+            return []
+
+        # Load config and create API client
+        config_manager = Config()
+        config_manager.load()
+        config = config_manager.config
+        api = DigitalOceanAPI(config.digitalocean.token)
+
+        # Get username and fetch droplets with user tag
+        username = api.get_username()
+        tag_name = get_user_tag(username)
+        droplets = api.list_droplets(tag_name=tag_name)
+
+        # Extract droplet names
+        droplet_names = [d.get("name", "") for d in droplets if d.get("name")]
+
+        # Filter by incomplete text (case-insensitive)
+        if incomplete:
+            droplet_names = [
+                name for name in droplet_names if name.lower().startswith(incomplete.lower())
+            ]
+
+        return droplet_names
+    except Exception:
+        # Silently fail on errors - completion should never break the CLI
+        return []
+
+
 def load_config_and_api() -> tuple[Config, DigitalOceanAPI]:
     """
     Load configuration and create API client.
@@ -981,7 +1025,7 @@ def list_droplets():
 
 @app.command()
 def config_ssh(
-    droplet_name: str,
+    droplet_name: str = typer.Argument(..., autocompletion=complete_droplet_name),
     user: str | None = typer.Option(None, "--user", "-u", help="SSH username"),
     identity_file: str | None = typer.Option(
         None, "--identity-file", "-i", help="SSH identity file path"
@@ -1069,7 +1113,7 @@ def config_ssh(
 
 
 @app.command()
-def info(droplet_name: str):
+def info(droplet_name: str = typer.Argument(..., autocompletion=complete_droplet_name)):
     """Show detailed information about a droplet."""
     try:
         # Load config and API
@@ -1215,7 +1259,7 @@ def info(droplet_name: str):
 
 
 @app.command()
-def destroy(droplet_name: str):
+def destroy(droplet_name: str = typer.Argument(..., autocompletion=complete_droplet_name)):
     """
     Destroy a droplet (DESTRUCTIVE - requires confirmation).
 
@@ -1339,7 +1383,7 @@ def destroy(droplet_name: str):
 
 @app.command()
 def resize(
-    droplet_name: str,
+    droplet_name: str = typer.Argument(..., autocompletion=complete_droplet_name),
     size: str | None = typer.Option(None, "--size", "-s", help="New size slug (e.g., s-4vcpu-8gb)"),
     disk: bool = typer.Option(
         True, "--disk/--no-disk", help="Resize disk (permanent, default: True)"
@@ -1588,7 +1632,7 @@ def resize(
 
 
 @app.command()
-def on(droplet_name: str):
+def on(droplet_name: str = typer.Argument(..., autocompletion=complete_droplet_name)):
     """
     Power on a droplet.
 
@@ -1658,7 +1702,7 @@ def on(droplet_name: str):
 
 
 @app.command()
-def off(droplet_name: str):
+def off(droplet_name: str = typer.Argument(..., autocompletion=complete_droplet_name)):
     """
     Power off a droplet (requires confirmation).
 

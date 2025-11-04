@@ -133,6 +133,33 @@ All SSH config entries use the prefix `tobcloud.<droplet-name>`:
 
 - Connect with: `ssh tobcloud.my-droplet`
 
+### Shell Completion
+
+Enable tab completion for droplet names in your shell:
+
+**Zsh (recommended):**
+```bash
+tobcloud --install-completion zsh
+```
+
+**Bash:**
+```bash
+tobcloud --install-completion bash
+```
+
+After installation, restart your shell or source your configuration file. You can then use tab completion with commands that accept droplet names:
+
+```bash
+tobcloud info <TAB>        # Shows your droplets
+tobcloud destroy <TAB>     # Shows your droplets
+tobcloud resize <TAB>      # Shows your droplets
+tobcloud on <TAB>          # Shows your droplets
+tobcloud off <TAB>         # Shows your droplets
+tobcloud config-ssh <TAB>  # Shows your droplets
+```
+
+The completion dynamically fetches your droplets from DigitalOcean, showing only those tagged with your username.
+
 ### Cloud-Init Customization
 
 Edit `~/.config/tobcloud/cloud-init.yaml` to customize user setup, package installation, firewall rules, and shell configuration. The template uses Jinja2 syntax with variables `{{ username }}` and `{{ ssh_keys }}`.

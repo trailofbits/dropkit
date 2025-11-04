@@ -290,8 +290,24 @@ username = Config.sanitize_email_for_username("john.doe@trailofbits.com")
    - `build_droplet_tags()` - Builds complete tag list with mandatory + extra tags
    - `register_ssh_keys_with_do()` - Handles SSH key detection, validation, and registration (~120 lines)
    - `wait_for_cloud_init()` - Polls cloud-init status via SSH (~159 lines)
+   - `complete_droplet_name()` - Shell completion function for droplet names
 
    **Benefits**: Single source of truth, easier maintenance, reduced code duplication
+
+11. **Shell Completion**:
+   - Dynamic tab completion for droplet names using Typer's autocompletion feature
+   - `complete_droplet_name()` function fetches droplet names from DO API
+   - Filters droplets by current user's tag (`owner:<username>`)
+   - Silently fails on errors to prevent breaking the CLI
+   - Supports case-insensitive prefix matching
+   - Used by commands: `info`, `destroy`, `config-ssh`, `resize`, `on`, `off`
+   - Enabled via `tobcloud --install-completion zsh` (or bash/fish)
+
+   **Implementation details**:
+   - Completion function accepts `incomplete: str` parameter (partial text from user)
+   - Returns `list[str]` of matching droplet names
+   - Connected to arguments via `autocompletion=complete_droplet_name` parameter
+   - Typer/Click handle shell integration automatically
 
 ### Pydantic Configuration Models
 
