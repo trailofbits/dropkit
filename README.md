@@ -252,6 +252,95 @@ uv run mypy tobcloud   # Type check
 - **Package Manager**: [uv](https://github.com/astral-sh/uv) - Fast Python package manager
 - **Code Quality**: Ruff (linter/formatter) + Mypy (type checker)
 
+## Appendix: API Token Permissions
+
+### Understanding DigitalOcean API Token Scopes
+
+DigitalOcean uses **custom scopes** to control what actions an API token can perform. When creating your API token, you can choose between:
+- **Full Access** (all permissions) - simpler but less secure
+- **Custom Scopes** (specific permissions) - more secure, recommended
+
+### Required Scopes for tobcloud
+
+To use all features of tobcloud, your DigitalOcean API token needs these **19 specific scopes**:
+
+#### Account (Read-Only)
+- `account:read` - View account details (used to fetch your email for username)
+
+#### Actions (Read-Only)
+- `actions:read` - View action status (monitor resize/power operations)
+
+#### Droplets (Full Management)
+- `droplet:read` - View droplets (list, get info)
+- `droplet:create` - Create droplets
+- `droplet:update` - Modify droplets (resize, power on/off)
+- `droplet:delete` - Delete droplets
+
+#### Images (Read-Only)
+- `image:read` - View images (for interactive prompts)
+
+#### Projects (Read + Update)
+- `project:read` - View projects (list, get default project)
+- `project:update` - Modify projects (assign droplets to projects)
+
+#### Regions (Read-Only)
+- `regions:read` - View data center regions (for interactive prompts)
+
+#### Sizes (Read-Only)
+- `sizes:read` - View droplet plan sizes (for interactive prompts)
+
+#### Snapshots (Read-Only)
+- `snapshot:read` - View snapshots (required by other DigitalOcean operations)
+
+#### SSH Keys (Full Management)
+- `ssh_key:read` - View SSH keys (list, check if exists)
+- `ssh_key:create` - Upload SSH keys
+- `ssh_key:update` - Modify SSH keys (update names)
+- `ssh_key:delete` - Delete SSH keys
+
+#### Tags (Create + Read)
+- `tag:read` - Filter droplets by tags (for owner-based filtering)
+- `tag:create` - Create tags when creating droplets (owner, firewall tags)
+
+#### VPC (Read-Only)
+- `vpc:read` - View VPC networks (required by other DigitalOcean operations)
+
+### How to Create Your Token
+
+#### Option 1: Custom Scopes (Recommended - Most Secure)
+
+1. Go to [DigitalOcean API Tokens](https://cloud.digitalocean.com/account/api/tokens)
+2. Click **Generate New Token**
+3. Give it a descriptive name (e.g., "tobcloud-cli")
+4. Select **Custom Scopes**
+5. Check all 19 scopes listed above
+6. Set expiration period (or no expiration)
+7. Click **Generate Token**
+
+#### Option 2: Full Access (Simpler)
+
+1. Go to [DigitalOcean API Tokens](https://cloud.digitalocean.com/account/api/tokens)
+2. Click **Generate New Token**
+3. Give it a descriptive name (e.g., "tobcloud-cli")
+4. Select **Full Access** or **Read and Write**
+5. Set expiration period
+6. Click **Generate Token**
+
+### Scope Reference by Feature
+
+| Feature | Required Scopes |
+|---------|----------------|
+| **Initialize config** | `account:read`, `regions:read`, `sizes:read`, `image:read`, `ssh_key:read`, `ssh_key:create`, `project:read` |
+| **Create droplets** | `droplet:create`, `project:update`, `actions:read`, `tag:create` |
+| **List droplets** | `droplet:read`, `tag:read` |
+| **Show droplet info** | `droplet:read` |
+| **Destroy droplets** | `droplet:delete` |
+| **Resize droplets** | `droplet:update`, `sizes:read`, `actions:read` |
+| **Power on/off** | `droplet:update`, `actions:read` |
+| **Manage SSH keys** | `ssh_key:read`, `ssh_key:create`, `ssh_key:update`, `ssh_key:delete` |
+
+For more information, see the [DigitalOcean API Token Scopes documentation](https://docs.digitalocean.com/reference/api/scopes/).
+
 ## License
 
 [Add your license here]
