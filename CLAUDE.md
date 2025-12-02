@@ -134,6 +134,48 @@ uv run pytest -k "validate_ssh_public_key"
   - **Username property tests**: Configured username, fallback to system username, before config loaded
   - Tests empty fields, missing fields, extra fields, type validation, nested validation
 
+### Parallel Development with Git Worktrees
+
+When running multiple Claude Code instances in parallel (e.g., for different features), use **git worktrees** to isolate each instance in its own working directory.
+
+**Setup:**
+
+```bash
+# Create worktrees for parallel development
+git worktree add ../tobcloud-feature-a feature-a
+git worktree add ../tobcloud-feature-b feature-b
+
+# Each worktree gets its own directory with full codebase
+# Run Claude Code in each directory independently
+```
+
+**Guidelines for Parallel Instances:**
+
+1. **One worktree per Claude Code instance** - Never run multiple instances in the same directory
+2. **Separate branches** - Each worktree should be on its own feature branch
+3. **Independent `uv sync`** - Run `uv sync` in each worktree (creates separate `.venv`)
+4. **Tests run independently** - Each worktree can run its own test suite without conflicts
+5. **Merge via main branch** - When features are complete, merge branches to main
+
+**Managing Worktrees:**
+
+```bash
+# List all worktrees
+git worktree list
+
+# Remove a worktree when done
+git worktree remove ../tobcloud-feature-a
+
+# Prune stale worktree entries
+git worktree prune
+```
+
+**Potential Conflicts to Avoid:**
+
+- **~/.config/tobcloud/** - User config is shared; don't modify during parallel dev
+- **~/.ssh/config** - SSH config is shared; coordinate droplet names
+- **DigitalOcean API** - Creating droplets with same name will conflict
+
 ### Manual Testing Commands
 
 ```bash
