@@ -1564,6 +1564,140 @@ def destroy(droplet_name: str = typer.Argument(..., autocompletion=complete_drop
 
 
 @app.command()
+def rename(
+    old_name: str = typer.Argument(..., autocompletion=complete_droplet_name),
+    new_name: str = typer.Argument(..., help="New name for the droplet"),
+):
+    """
+    Rename a droplet (requires confirmation).
+
+    This will rename the droplet and update the SSH config entry.
+    Only droplets tagged with owner:<your-username> can be renamed.
+    """
+    try:
+        # Load config and API
+        config_manager, api = load_config_and_api()
+        config = config_manager.config
+
+        # Find the droplet
+        console.print(f"[dim]Looking for droplet: [cyan]{old_name}[/cyan][/dim]\n")
+        droplet, username = find_user_droplet(api, old_name)
+
+        if not droplet or not username:
+            tag = get_user_tag(username) if username else "owner:<unknown>"
+            console.print(f"[red]Error: Droplet '{old_name}' not found with tag {tag}[/red]")
+            raise typer.Exit(1)
+
+        # Get droplet ID
+        droplet_id = droplet.get("id")
+        if not droplet_id:
+            console.print("[red]Error: Could not determine droplet ID[/red]")
+            raise typer.Exit(1)
+
+        # Check if new name is same as old name
+        if old_name == new_name:
+            console.print(f"[yellow]New name is the same as current name ({old_name})[/yellow]")
+            console.print("[dim]No rename needed.[/dim]")
+            raise typer.Exit(0)
+
+        # Get detailed droplet info for display
+        droplet = api.get_droplet(droplet_id)
+
+        # Get IP address for SSH config update
+        ip_address = None
+        v4_networks = droplet.get("networks", {}).get("v4", [])
+        for network in v4_networks:
+            if network.get("type") == "public":
+                ip_address = network.get("ip_address")
+                break
+
+        # Display droplet information
+        console.print(
+            Panel.fit(
+                "[bold cyan]RENAME DROPLET[/bold cyan]",
+                border_style="cyan",
+            )
+        )
+
+        info_table = Table(show_header=False, box=None, padding=(0, 2))
+        info_table.add_column(style="dim")
+        info_table.add_column(style="white")
+
+        info_table.add_row("Current name:", f"[cyan]{old_name}[/cyan]")
+        info_table.add_row("New name:", f"[green]{new_name}[/green]")
+        info_table.add_row("ID:", str(droplet_id))
+        if ip_address:
+            info_table.add_row("IP:", ip_address)
+        info_table.add_row("Status:", droplet.get("status", "unknown"))
+
+        console.print(info_table)
+        console.print()
+
+        # Show SSH config change
+        old_ssh_hostname = get_ssh_hostname(old_name)
+        new_ssh_hostname = get_ssh_hostname(new_name)
+        console.print(f"[dim]SSH config will change: {old_ssh_hostname} → {new_ssh_hostname}[/dim]")
+        console.print()
+
+        # Confirmation
+        confirm = Prompt.ask(
+            "[yellow]Are you sure you want to rename this droplet?[/yellow]",
+            choices=["yes", "no"],
+            default="no",
+        )
+
+        if confirm != "yes":
+            console.print("[dim]Cancelled.[/dim]")
+            raise typer.Exit(0)
+
+        # Perform rename via API
+        console.print()
+        console.print("[dim]Renaming droplet...[/dim]")
+
+        api.rename_droplet(droplet_id, new_name)
+        console.print(f"[green]✓[/green] Droplet renamed to [cyan]{new_name}[/cyan]")
+
+        # Update SSH config
+        if host_exists(config.ssh.config_path, old_ssh_hostname):
+            try:
+                # Remove old SSH entry
+                remove_ssh_host(config.ssh.config_path, old_ssh_hostname)
+                console.print(
+                    f"[green]✓[/green] Removed old SSH config entry: [dim]{old_ssh_hostname}[/dim]"
+                )
+
+                # Add new SSH entry if we have the IP
+                if ip_address:
+                    add_ssh_host(
+                        config_path=config.ssh.config_path,
+                        host_name=new_ssh_hostname,
+                        hostname=ip_address,
+                        user=username,
+                        identity_file=config.ssh.identity_file,
+                    )
+                    console.print(
+                        f"[green]✓[/green] Added new SSH config entry: [cyan]{new_ssh_hostname}[/cyan]"
+                    )
+            except Exception as e:
+                console.print(f"[yellow]⚠[/yellow] Could not update SSH config: {e}")
+                console.print(
+                    f"[dim]Run 'tobcloud config-ssh {new_name}' to configure SSH manually[/dim]"
+                )
+        else:
+            console.print(f"[dim]SSH config entry for {old_ssh_hostname} not found (skipped)[/dim]")
+
+        console.print()
+        console.print(f"[bold green]Droplet successfully renamed to {new_name}[/bold green]")
+        if ip_address and host_exists(config.ssh.config_path, new_ssh_hostname):
+            console.print("\n[bold]Connect with:[/bold]")
+            console.print(f"  [cyan]ssh {new_ssh_hostname}[/cyan]")
+
+    except DigitalOceanAPIError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
+
+
+@app.command()
 def resize(
     droplet_name: str = typer.Argument(..., autocompletion=complete_droplet_name),
     size: str | None = typer.Option(None, "--size", "-s", help="New size slug (e.g., s-4vcpu-8gb)"),

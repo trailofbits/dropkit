@@ -104,6 +104,7 @@ Commands:
   list             List droplets tagged with owner:<username>.
   config-ssh       Configure SSH for an existing droplet.
   info             Show detailed information about a droplet.
+  rename           Rename a droplet (requires confirmation).
   destroy          Destroy a droplet (DESTRUCTIVE - requires confirmation).
   resize           Resize a droplet (causes downtime - requires power off).
   on               Power on a droplet.
@@ -167,6 +168,7 @@ After installation, restart your shell or source your configuration file. You ca
 
 ```bash
 tobcloud info <TAB>        # Shows your droplets
+tobcloud rename <TAB>      # Shows your droplets
 tobcloud destroy <TAB>     # Shows your droplets
 tobcloud resize <TAB>      # Shows your droplets
 tobcloud on <TAB>          # Shows your droplets
@@ -335,6 +337,7 @@ To use all features of tobcloud, your DigitalOcean API token needs these **19 sp
 | **List droplets** | `droplet:read`, `tag:read` |
 | **Show droplet info** | `droplet:read` |
 | **Destroy droplets** | `droplet:delete` |
+| **Rename droplets** | `droplet:update` |
 | **Resize droplets** | `droplet:update`, `sizes:read`, `actions:read` |
 | **Power on/off** | `droplet:update`, `actions:read` |
 | **Manage SSH keys** | `ssh_key:read`, `ssh_key:create`, `ssh_key:update`, `ssh_key:delete` |
