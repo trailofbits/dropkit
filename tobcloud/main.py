@@ -562,9 +562,10 @@ def run_tailscale_up(ssh_hostname: str, verbose: bool = False) -> str | None:
         # Parse auth URL from output
         # Format: "To authenticate, visit:\n\n\thttps://login.tailscale.com/a/..."
         for line in output.split("\n"):
+            # Match URL and strip trailing punctuation that's unlikely to be part of URL
             url_match = re.search(r"https://[^\s]+", line)
             if url_match:
-                url = url_match.group(0)
+                url = url_match.group(0).rstrip(".,;:!?'\")>]}")
                 if "login.tailscale.com" in url or "tailscale.com" in url:
                     return url
 
