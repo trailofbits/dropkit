@@ -536,8 +536,10 @@ def run_tailscale_up(ssh_hostname: str, verbose: bool = False) -> str | None:
         console.print("[dim][DEBUG] Running tailscale up on droplet...[/dim]")
 
     try:
-        # Run tailscale up and capture stderr where the auth URL appears
-        # Note: tailscale up outputs the auth URL to stderr
+        # Run tailscale up with a timeout on the remote side.
+        # tailscale up blocks waiting for authentication, so we use `timeout`
+        # to kill it after 5 seconds - the auth URL is printed immediately.
+        # The `|| true` ensures we don't fail due to timeout's exit code.
         result = subprocess.run(
             [
                 "ssh",
@@ -548,7 +550,7 @@ def run_tailscale_up(ssh_hostname: str, verbose: bool = False) -> str | None:
                 "-o",
                 "ConnectTimeout=10",
                 ssh_hostname,
-                "sudo tailscale up 2>&1",
+                "timeout 5 sudo tailscale up 2>&1 || true",
             ],
             capture_output=True,
             timeout=30,
