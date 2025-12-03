@@ -1,6 +1,7 @@
 """Main CLI application for tobcloud."""
 
 import json
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -531,8 +532,6 @@ def run_tailscale_up(ssh_hostname: str, verbose: bool = False) -> str | None:
     Returns:
         Auth URL if found, None if tailscale up failed
     """
-    import re
-
     if verbose:
         console.print("[dim][DEBUG] Running tailscale up on droplet...[/dim]")
 
