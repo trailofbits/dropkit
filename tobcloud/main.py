@@ -654,22 +654,23 @@ def lock_down_to_tailscale(ssh_hostname: str, verbose: bool = False) -> bool:
         verbose: Show debug output
 
     Returns:
-        True if successful, False otherwise
+        True if all UFW commands succeeded, False if any command failed
     """
     if verbose:
         console.print("[dim][DEBUG] Locking down UFW to tailscale0 only...[/dim]")
 
     try:
         # UFW commands to lock down to Tailscale only
+        # These must all succeed for proper firewall lockdown
         commands = [
-            "sudo ufw --force reset",
-            "sudo ufw allow in on tailscale0",
-            "sudo ufw default deny incoming",
-            "sudo ufw default allow outgoing",
-            'echo "y" | sudo ufw enable',
+            ("sudo ufw --force reset", "reset UFW"),
+            ("sudo ufw allow in on tailscale0", "allow tailscale0 traffic"),
+            ("sudo ufw default deny incoming", "deny incoming by default"),
+            ("sudo ufw default allow outgoing", "allow outgoing by default"),
+            ('echo "y" | sudo ufw enable', "enable UFW"),
         ]
 
-        for cmd in commands:
+        for cmd, description in commands:
             result = subprocess.run(
                 [
                     "ssh",
@@ -688,6 +689,15 @@ def lock_down_to_tailscale(ssh_hostname: str, verbose: bool = False) -> bool:
 
             if verbose:
                 console.print(f"[dim][DEBUG] {cmd}: returncode={result.returncode}[/dim]")
+
+            # Check return code - any failure means firewall is in unknown state
+            if result.returncode != 0:
+                stderr = result.stderr.decode("utf-8", errors="ignore").strip()
+                if verbose:
+                    console.print(
+                        f"[dim][DEBUG] UFW command failed to {description}: {stderr}[/dim]"
+                    )
+                return False
 
         return True
 
