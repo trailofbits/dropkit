@@ -89,6 +89,10 @@ def add_ssh_host(
     if identity_file:
         host_entry += f"    IdentityFile {identity_file}\n"
 
+    # Ensure existing content ends with newline before appending
+    if existing_content and not existing_content.endswith("\n"):
+        existing_content += "\n"
+
     # Append new entry
     new_content = existing_content + host_entry + "\n"
 
