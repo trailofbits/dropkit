@@ -338,6 +338,8 @@ username = Config.sanitize_email_for_username("john.doe@trailofbits.com")
    - `complete_project_name()` - Shell completion function for project names
    - `setup_tailscale()` - Full Tailscale setup flow (auth, SSH config, firewall lockdown)
    - `check_local_tailscale()` - Checks if Tailscale is running locally
+   - `check_tailscale_installed()` - Checks if Tailscale is installed on a droplet
+   - `install_tailscale_on_droplet()` - Installs Tailscale on droplet via SSH
    - `run_tailscale_up()` - Runs `tailscale up` on droplet, extracts auth URL
    - `wait_for_tailscale_ip()` - Polls for Tailscale IP after authentication
    - `lock_down_to_tailscale()` - Resets UFW to only allow tailscale0 traffic
@@ -351,7 +353,7 @@ username = Config.sanitize_email_for_username("john.doe@trailofbits.com")
    - Filters droplets by current user's tag (`owner:<username>`)
    - Silently fails on errors to prevent breaking the CLI
    - Supports case-insensitive prefix matching
-   - Used by commands: `info`, `destroy`, `config-ssh`, `resize`, `on`, `off`
+   - Used by commands: `info`, `destroy`, `config-ssh`, `resize`, `on`, `off`, `enable-tailscale`
    - Enabled via `tobcloud --install-completion zsh` (or bash/fish)
 
    **Implementation details**:
@@ -581,6 +583,18 @@ tags = config_manager.config.defaults.tags         # List[str]
   - Initiates power off action via DigitalOcean API
   - Polls action status until complete (2 minute timeout)
   - Shows success message
+
+- [x] `tobcloud enable-tailscale <droplet-name>` - Enable Tailscale VPN on existing droplet
+  - Only allows modifying droplets tagged with `owner:<username>`
+  - Droplet must be active (powered on)
+  - Installs Tailscale if not already installed via official script
+  - Runs `tailscale up` and displays auth URL for browser login
+  - Polls for Tailscale IP after authentication
+  - Updates SSH config with Tailscale IP
+  - Optionally locks down firewall to Tailscale only
+  - **Options**:
+    - `--no-lockdown` - Skip firewall lockdown (keep public SSH access)
+    - `--verbose` / `-v` - Show debug output
 
 ## DigitalOcean API Endpoints
 

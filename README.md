@@ -121,6 +121,7 @@ Commands:
   resize           Resize a droplet (causes downtime - requires power off).
   on               Power on a droplet.
   off              Power off a droplet (requires confirmation).
+  enable-tailscale Enable Tailscale VPN on an existing droplet.
   list-ssh-keys    List SSH keys registered via tobcloud.
   add-ssh-key      Add or import an SSH public key to DigitalOcean.
   delete-ssh-key   Delete an SSH key registered via tobcloud.
@@ -179,13 +180,14 @@ tobcloud --install-completion bash
 After installation, restart your shell or source your configuration file. You can then use tab completion with commands that accept droplet names:
 
 ```bash
-tobcloud info <TAB>        # Shows your droplets
-tobcloud rename <TAB>      # Shows your droplets
-tobcloud destroy <TAB>     # Shows your droplets
-tobcloud resize <TAB>      # Shows your droplets
-tobcloud on <TAB>          # Shows your droplets
-tobcloud off <TAB>         # Shows your droplets
-tobcloud config-ssh <TAB>  # Shows your droplets
+tobcloud info <TAB>             # Shows your droplets
+tobcloud rename <TAB>           # Shows your droplets
+tobcloud destroy <TAB>          # Shows your droplets
+tobcloud resize <TAB>           # Shows your droplets
+tobcloud on <TAB>               # Shows your droplets
+tobcloud off <TAB>              # Shows your droplets
+tobcloud config-ssh <TAB>       # Shows your droplets
+tobcloud enable-tailscale <TAB> # Shows your droplets
 ```
 
 The completion dynamically fetches your droplets from DigitalOcean, showing only those tagged with your username.

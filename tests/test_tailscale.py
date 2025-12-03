@@ -8,6 +8,8 @@ import pytest
 from tobcloud.config import TailscaleConfig
 from tobcloud.main import (
     check_local_tailscale,
+    check_tailscale_installed,
+    install_tailscale_on_droplet,
     is_tailscale_ip,
     lock_down_to_tailscale,
     run_tailscale_up,
@@ -279,3 +281,73 @@ class TestTailscaleConfig:
         """Test auth_timeout at minimum value."""
         config = TailscaleConfig(auth_timeout=30)
         assert config.auth_timeout == 30
+
+
+class TestCheckTailscaleInstalled:
+    """Tests for check_tailscale_installed function."""
+
+    @patch("tobcloud.main.subprocess.run")
+    def test_tailscale_installed(self, mock_run):
+        """Test when Tailscale is installed."""
+        mock_run.return_value = MagicMock(returncode=0)
+        assert check_tailscale_installed("tobcloud.test") is True
+
+    @patch("tobcloud.main.subprocess.run")
+    def test_tailscale_not_installed(self, mock_run):
+        """Test when Tailscale is not installed."""
+        mock_run.return_value = MagicMock(returncode=1)
+        assert check_tailscale_installed("tobcloud.test") is False
+
+    @patch("tobcloud.main.subprocess.run")
+    def test_ssh_timeout(self, mock_run):
+        """Test when SSH connection times out."""
+        import subprocess
+
+        mock_run.side_effect = subprocess.TimeoutExpired("ssh", 15)
+        assert check_tailscale_installed("tobcloud.test") is False
+
+    @patch("tobcloud.main.subprocess.run")
+    def test_ssh_connection_failed(self, mock_run):
+        """Test when SSH connection fails."""
+        import subprocess
+
+        mock_run.side_effect = subprocess.SubprocessError("Connection refused")
+        assert check_tailscale_installed("tobcloud.test") is False
+
+
+class TestInstallTailscaleOnDroplet:
+    """Tests for install_tailscale_on_droplet function."""
+
+    @patch("tobcloud.main.subprocess.run")
+    def test_install_success(self, mock_run):
+        """Test successful Tailscale installation."""
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=b"Installation complete!",
+        )
+        assert install_tailscale_on_droplet("tobcloud.test") is True
+
+    @patch("tobcloud.main.subprocess.run")
+    def test_install_failure(self, mock_run):
+        """Test failed Tailscale installation."""
+        mock_run.return_value = MagicMock(
+            returncode=1,
+            stdout=b"Error: curl failed",
+        )
+        assert install_tailscale_on_droplet("tobcloud.test") is False
+
+    @patch("tobcloud.main.subprocess.run")
+    def test_install_timeout(self, mock_run):
+        """Test when installation times out."""
+        import subprocess
+
+        mock_run.side_effect = subprocess.TimeoutExpired("ssh", 120)
+        assert install_tailscale_on_droplet("tobcloud.test") is False
+
+    @patch("tobcloud.main.subprocess.run")
+    def test_ssh_connection_failed(self, mock_run):
+        """Test when SSH connection fails during install."""
+        import subprocess
+
+        mock_run.side_effect = subprocess.SubprocessError("Connection refused")
+        assert install_tailscale_on_droplet("tobcloud.test") is False
