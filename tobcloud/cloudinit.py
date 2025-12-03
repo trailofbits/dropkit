@@ -13,6 +13,7 @@ def render_cloud_init(
     full_name: str,
     email: str,
     ssh_keys: list[str],
+    tailscale_enabled: bool = True,
 ) -> str:
     """
     Render cloud-init template with user data.
@@ -23,6 +24,7 @@ def render_cloud_init(
         full_name: Full name extracted from email (for git user.name)
         email: Email address from DigitalOcean account (for git user.email)
         ssh_keys: List of SSH public key file paths
+        tailscale_enabled: Whether to install Tailscale VPN (default: True)
 
     Returns:
         Rendered cloud-init configuration as string
@@ -51,6 +53,7 @@ def render_cloud_init(
         full_name=full_name,
         email=email,
         ssh_keys=ssh_key_contents,
+        tailscale_enabled=tailscale_enabled,
     )
 
     return rendered

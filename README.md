@@ -6,6 +6,7 @@ A command-line tool for managing DigitalOcean droplets with automated setup, SSH
 
 - 🚀 **Quick droplet creation** with cloud-init automation
 - 🔑 **Automatic SSH configuration** - just run `ssh tobcloud.<droplet-name>`
+- 🔐 **Tailscale VPN** - secure access via Tailscale (enabled by default)
 - 👤 **User management** - automatically creates your user account on droplets
 - 🏷️ **Smart tagging** - organizes droplets by owner for easy filtering
 - 🔒 **Security-first** - SSH key validation, confirmation prompts for destructive operations
@@ -18,6 +19,7 @@ A command-line tool for managing DigitalOcean droplets with automated setup, SSH
 - **DigitalOcean account** with an API token ([create one here](https://cloud.digitalocean.com/account/api/tokens))
 - **SSH key pair** (usually `~/.ssh/id_ed25519.pub` or `~/.ssh/id_rsa.pub`)
 - **uv** package manager ([install instructions](https://github.com/astral-sh/uv))
+- **Tailscale** (optional but recommended) - install from [tailscale.com/download](https://tailscale.com/download)
 
 ## Installation
 
@@ -79,9 +81,19 @@ tobcloud create my-first-droplet
 
 # Assign to a specific project (by name or ID)
 tobcloud create my-droplet --project "My Project"
+
+# Create without Tailscale VPN
+tobcloud create my-droplet --no-tailscale
 ```
 
-The tool will create the droplet, wait for it to become active, add SSH configuration automatically, and wait for cloud-init to complete.
+The tool will:
+1. Create the droplet and wait for it to become active
+2. Add SSH configuration automatically
+3. Wait for cloud-init to complete
+4. **Tailscale setup** (enabled by default):
+   - Display an auth URL for you to authenticate in your browser
+   - Update SSH config with your Tailscale IP
+   - Lock down the firewall to only allow Tailscale traffic
 
 ### 3. Connect via SSH
 

@@ -90,6 +90,11 @@ runcmd:
   - ufw limit ssh
   - ufw --force enable
 
+  {% if tailscale_enabled %}
+  # Install Tailscale via official script (daemon only, authentication handled by tobcloud)
+  - curl -fsSL https://tailscale.com/install.sh | sh
+  {% endif %}
+
   # Wait for user to be fully created
   - |
     timeout=30
