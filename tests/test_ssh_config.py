@@ -349,6 +349,11 @@ Host myserver
         content = Path(temp_config).read_text()
         assert "Host myhost" in content
         assert "Host newhost" in content
+        # Verify Host newhost is on its own line (not concatenated to previous line)
+        lines = content.split("\n")
+        host_lines = [line for line in lines if "Host newhost" in line]
+        assert len(host_lines) == 1
+        assert host_lines[0].strip() == "Host newhost"
 
     def test_permissions_preserved(self, temp_config):
         """Test that file permissions are set correctly."""
