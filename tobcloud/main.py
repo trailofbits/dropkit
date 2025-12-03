@@ -848,16 +848,23 @@ def setup_tailscale(
 
     # Update SSH config with Tailscale IP
     console.print("[dim]Updating SSH config with Tailscale IP...[/dim]")
-    add_ssh_host(
-        config_path=config.ssh.config_path,
-        host_name=ssh_hostname,
-        hostname=tailscale_ip,
-        user=username,
-        identity_file=config.ssh.identity_file,
-    )
-    console.print(
-        f"[green]✓[/green] Updated SSH config: [cyan]{ssh_hostname}[/cyan] -> {tailscale_ip}"
-    )
+    try:
+        add_ssh_host(
+            config_path=config.ssh.config_path,
+            host_name=ssh_hostname,
+            hostname=tailscale_ip,
+            user=username,
+            identity_file=config.ssh.identity_file,
+        )
+        console.print(
+            f"[green]✓[/green] Updated SSH config: [cyan]{ssh_hostname}[/cyan] -> {tailscale_ip}"
+        )
+    except OSError as e:
+        console.print(f"[yellow]⚠[/yellow] Could not update SSH config: {e}")
+        console.print(
+            f"[dim]You can connect manually: ssh -i {config.ssh.identity_file} "
+            f"{username}@{tailscale_ip}[/dim]"
+        )
 
     # Lock down firewall if configured
     if config.tailscale.lock_down_firewall:
