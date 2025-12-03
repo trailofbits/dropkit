@@ -85,7 +85,7 @@ class TailscaleConfig(BaseModel):
         default=True, description="Reset UFW to only allow traffic on tailscale0 interface"
     )
     auth_timeout: int = Field(
-        default=300, description="Timeout in seconds for Tailscale authentication"
+        default=300, ge=30, description="Timeout in seconds for Tailscale authentication (min: 30)"
     )
 
 
