@@ -577,6 +577,38 @@ def run_tailscale_up(ssh_hostname: str, verbose: bool = False) -> str | None:
         return None
 
 
+def is_tailscale_ip(ip: str) -> bool:
+    """
+    Check if an IP address is in the Tailscale CGNAT range.
+
+    Tailscale uses the CGNAT IP range 100.64.0.0/10 (100.64.0.0 - 100.127.255.255).
+
+    Args:
+        ip: IP address string to validate
+
+    Returns:
+        True if the IP is in the Tailscale CGNAT range
+    """
+    try:
+        parts = ip.split(".")
+        if len(parts) != 4:
+            return False
+
+        octets = [int(p) for p in parts]
+
+        # Check all octets are valid (0-255)
+        if not all(0 <= o <= 255 for o in octets):
+            return False
+
+        # Tailscale CGNAT range: 100.64.0.0/10
+        # First octet must be 100
+        # Second octet must be 64-127 (the /10 covers 64 addresses in second octet)
+        return octets[0] == 100 and 64 <= octets[1] <= 127
+
+    except (ValueError, AttributeError):
+        return False
+
+
 def wait_for_tailscale_ip(
     ssh_hostname: str,
     timeout: int = 300,
@@ -622,8 +654,8 @@ def wait_for_tailscale_ip(
 
             output = result.stdout.decode("utf-8", errors="ignore").strip()
 
-            # Validate it's a valid Tailscale IP (100.x.x.x range)
-            if output and output.startswith("100."):
+            # Validate it's a valid Tailscale CGNAT IP (100.64.0.0/10 range)
+            if output and is_tailscale_ip(output):
                 if verbose:
                     console.print(f"[dim][DEBUG] Got Tailscale IP: {output}[/dim]")
                 return output
