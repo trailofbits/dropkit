@@ -170,6 +170,57 @@ def get_ssh_hostname(droplet_name: str) -> str:
     return f"tobcloud.{droplet_name}"
 
 
+def ensure_ssh_config(
+    droplet: dict,
+    droplet_name: str,
+    username: str,
+    config: TobcloudConfig,
+) -> str:
+    """
+    Ensure SSH config entry exists for a droplet.
+
+    Checks if the SSH config already has an entry for this droplet.
+    If not, extracts the public IP and adds an SSH config entry.
+
+    Args:
+        droplet: Droplet dict from DigitalOcean API
+        droplet_name: Name of the droplet
+        username: Username for SSH connection
+        config: TobcloudConfig instance with SSH settings
+
+    Returns:
+        SSH hostname (e.g., "tobcloud.my-droplet")
+
+    Raises:
+        ValueError: If droplet has no public IP
+    """
+    ssh_hostname = get_ssh_hostname(droplet_name)
+
+    if not host_exists(config.ssh.config_path, ssh_hostname):
+        # Get public IP from droplet networks
+        networks = droplet.get("networks", {})
+        public_ip = None
+        for network in networks.get("v4", []):
+            if network.get("type") == "public":
+                public_ip = network.get("ip_address")
+                break
+
+        if not public_ip:
+            raise ValueError("Could not find public IP for droplet")
+
+        console.print(f"[dim]Adding SSH config for {ssh_hostname}...[/dim]")
+        add_ssh_host(
+            config_path=config.ssh.config_path,
+            host_name=ssh_hostname,
+            hostname=public_ip,
+            user=username,
+            identity_file=config.ssh.identity_file,
+        )
+        console.print(f"[green]✓[/green] Added SSH config: {ssh_hostname} -> {public_ip}")
+
+    return ssh_hostname
+
+
 def get_user_tag(username: str) -> str:
     """
     Get the user tag for filtering droplets.
@@ -2670,33 +2721,12 @@ def enable_tailscale(
             console.print("[dim]Use 'tobcloud on' to power on the droplet first.[/dim]")
             raise typer.Exit(1)
 
-        # Get SSH hostname
-        ssh_hostname = get_ssh_hostname(droplet_name)
-
-        # Check if droplet is in SSH config
-        ssh_config_path = config_manager.config.ssh.config_path
-        if not host_exists(ssh_config_path, ssh_hostname):
-            # Get public IP and add to SSH config first
-            networks = droplet.get("networks", {})
-            public_ip = None
-            for network in networks.get("v4", []):
-                if network.get("type") == "public":
-                    public_ip = network.get("ip_address")
-                    break
-
-            if not public_ip:
-                console.print("[red]Error: Could not find public IP for droplet[/red]")
-                raise typer.Exit(1)
-
-            console.print(f"[dim]Adding SSH config for {ssh_hostname}...[/dim]")
-            add_ssh_host(
-                config_path=ssh_config_path,
-                host_name=ssh_hostname,
-                hostname=public_ip,
-                user=username,
-                identity_file=config_manager.config.ssh.identity_file,
-            )
-            console.print(f"[green]✓[/green] Added SSH config: {ssh_hostname} -> {public_ip}")
+        # Ensure SSH config exists for this droplet
+        try:
+            ssh_hostname = ensure_ssh_config(droplet, droplet_name, username, config_manager.config)
+        except ValueError as e:
+            console.print(f"[red]Error: {e}[/red]")
+            raise typer.Exit(1)
 
         # Show panel
         console.print(
