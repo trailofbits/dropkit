@@ -481,16 +481,16 @@ class DigitalOceanAPI:
             new_name: New name for the droplet
 
         Returns:
-            Updated droplet object from API response
+            Action object with id, status, etc.
 
         Raises:
             ValueError: If droplet_id is not positive
             DigitalOceanAPIError: If rename fails
         """
         self._validate_positive_int(droplet_id, "droplet_id")
-        payload = {"name": new_name}
-        response = self._request("PUT", f"/droplets/{droplet_id}", json=payload)
-        return response.get("droplet", {})
+        payload = {"type": "rename", "name": new_name}
+        response = self._request("POST", f"/droplets/{droplet_id}/actions", json=payload)
+        return response.get("action", {})
 
     def resize_droplet(self, droplet_id: int, size: str, disk: bool = True) -> dict[str, Any]:
         """

@@ -2174,7 +2174,13 @@ def rename(
         console.print()
         console.print("[dim]Renaming droplet...[/dim]")
 
-        api.rename_droplet(droplet_id, new_name)
+        action = api.rename_droplet(droplet_id, new_name)
+
+        # Wait for rename action to complete
+        action_id = action.get("id")
+        if action_id:
+            api.wait_for_action_complete(action_id, timeout=60, poll_interval=2)
+
         console.print(f"[green]✓[/green] Droplet renamed to [cyan]{new_name}[/cyan]")
 
         # Update SSH config
