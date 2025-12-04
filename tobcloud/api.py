@@ -681,3 +681,184 @@ class DigitalOceanAPI:
             URN string in format "do:droplet:{id}"
         """
         return f"do:droplet:{droplet_id}"
+
+    # Snapshot methods
+
+    def create_snapshot(self, droplet_id: int, name: str) -> dict[str, Any]:
+        """
+        Create a snapshot of a droplet.
+
+        Args:
+            droplet_id: Droplet ID to snapshot
+            name: Name for the snapshot
+
+        Returns:
+            Action object with id, status, etc.
+
+        Raises:
+            ValueError: If droplet_id is not positive
+            DigitalOceanAPIError: If snapshot creation fails
+        """
+        self._validate_positive_int(droplet_id, "droplet_id")
+        payload = {
+            "type": "snapshot",
+            "name": name,
+        }
+        response = self._request("POST", f"/droplets/{droplet_id}/actions", json=payload)
+        return response.get("action", {})
+
+    def list_snapshots(self, tag: str | None = None) -> list[dict[str, Any]]:
+        """
+        List snapshots, optionally filtered by tag.
+
+        Args:
+            tag: Optional tag to filter by (e.g., 'owner:myname')
+
+        Returns:
+            List of snapshot objects
+        """
+        extra_params: dict[str, str] = {"resource_type": "droplet"}
+        if tag:
+            extra_params["tag_name"] = tag
+        return self._get_paginated("/snapshots", "snapshots", extra_params=extra_params)
+
+    def get_snapshot(self, snapshot_id: int) -> dict[str, Any] | None:
+        """
+        Get a snapshot by ID.
+
+        Args:
+            snapshot_id: Snapshot ID
+
+        Returns:
+            Snapshot object if found, None if not found (404)
+
+        Raises:
+            ValueError: If snapshot_id is not positive
+            DigitalOceanAPIError: If request fails (non-404 errors)
+        """
+        self._validate_positive_int(snapshot_id, "snapshot_id")
+        try:
+            response = self._request("GET", f"/snapshots/{snapshot_id}")
+            return response.get("snapshot", {})
+        except DigitalOceanAPIError as e:
+            if e.status_code == 404:
+                return None
+            raise
+
+    def get_snapshot_by_name(self, name: str, tag: str | None = None) -> dict[str, Any] | None:
+        """
+        Find a snapshot by exact name.
+
+        Args:
+            name: Exact snapshot name to search for
+            tag: Optional tag to filter by
+
+        Returns:
+            Snapshot object if found, None if not found
+        """
+        snapshots = self.list_snapshots(tag=tag)
+        for snapshot in snapshots:
+            if snapshot.get("name") == name:
+                return snapshot
+        return None
+
+    def delete_snapshot(self, snapshot_id: int) -> None:
+        """
+        Delete a snapshot by ID.
+
+        Args:
+            snapshot_id: Snapshot ID to delete
+
+        Raises:
+            ValueError: If snapshot_id is not positive
+            DigitalOceanAPIError: If deletion fails
+        """
+        self._validate_positive_int(snapshot_id, "snapshot_id")
+        self._request("DELETE", f"/snapshots/{snapshot_id}")
+
+    def tag_resource(self, tag_name: str, resource_id: str, resource_type: str) -> None:
+        """
+        Add a tag to a resource.
+
+        Args:
+            tag_name: Tag name to apply
+            resource_id: Resource ID (string for snapshots/images)
+            resource_type: Resource type ('image' for snapshots, 'droplet', etc.)
+
+        Raises:
+            DigitalOceanAPIError: If tagging fails
+        """
+        payload = {
+            "resources": [
+                {
+                    "resource_id": resource_id,
+                    "resource_type": resource_type,
+                }
+            ]
+        }
+        self._request("POST", f"/tags/{tag_name}/resources", json=payload)
+
+    def create_tag(self, tag_name: str) -> dict[str, Any]:
+        """
+        Create a tag if it doesn't exist.
+
+        Args:
+            tag_name: Tag name to create
+
+        Returns:
+            Tag object from API response
+
+        Raises:
+            DigitalOceanAPIError: If creation fails (ignores 422 for existing tags)
+        """
+        payload = {"name": tag_name}
+        try:
+            response = self._request("POST", "/tags", json=payload)
+            return response.get("tag", {})
+        except DigitalOceanAPIError as e:
+            # 422 means tag already exists, which is fine
+            if e.status_code == 422:
+                return {"name": tag_name}
+            raise
+
+    def create_droplet_from_snapshot(
+        self,
+        name: str,
+        region: str,
+        size: str,
+        snapshot_id: int,
+        tags: list[str],
+        ssh_keys: list[int] | None = None,
+    ) -> dict[str, Any]:
+        """
+        Create a new droplet from a snapshot image.
+
+        Args:
+            name: Droplet name
+            region: Region slug (e.g., 'nyc3')
+            size: Size slug (e.g., 's-2vcpu-4gb')
+            snapshot_id: Snapshot ID to restore from
+            tags: List of tags to apply
+            ssh_keys: List of SSH key IDs for root access (optional)
+
+        Returns:
+            Droplet object from API response
+
+        Raises:
+            ValueError: If snapshot_id is not positive
+            DigitalOceanAPIError: If droplet creation fails
+        """
+        self._validate_positive_int(snapshot_id, "snapshot_id")
+        payload: dict[str, Any] = {
+            "name": name,
+            "region": region,
+            "size": size,
+            "image": snapshot_id,  # Snapshot ID as the image
+            "tags": tags,
+        }
+
+        if ssh_keys:
+            payload["ssh_keys"] = ssh_keys
+
+        response = self._request("POST", "/droplets", json=payload)
+        return response.get("droplet", {})

@@ -11,6 +11,7 @@ A command-line tool for managing DigitalOcean droplets with automated setup, SSH
 - 🔒 **Security-first** - SSH key validation, confirmation prompts for destructive operations
 - 📊 **Rich CLI** - beautiful tables, progress indicators, and helpful error messages
 - 🔄 **Complete lifecycle** - create, list, resize, destroy droplets with ease
+- 💤 **Hibernate/Wake** - snapshot and destroy to save costs, restore later with one command
 
 ## Prerequisites
 
@@ -101,13 +102,15 @@ Manage DigitalOcean droplets for ToB engineers
 Commands:
   init             Initialize tobcloud configuration.
   create           Create a new DigitalOcean droplet with cloud-init configuration.
-  list             List droplets tagged with owner:<username>.
+  list             List droplets and hibernated snapshots tagged with owner:<username>.
   config-ssh       Configure SSH for an existing droplet.
   info             Show detailed information about a droplet.
-  destroy          Destroy a droplet (DESTRUCTIVE - requires confirmation).
+  destroy          Destroy a droplet or hibernated snapshot (DESTRUCTIVE).
   resize           Resize a droplet (causes downtime - requires power off).
   on               Power on a droplet.
   off              Power off a droplet (requires confirmation).
+  hibernate        Hibernate a droplet (snapshot and destroy to save costs).
+  wake             Wake a hibernated droplet (restore from snapshot).
   list-ssh-keys    List SSH keys registered via tobcloud.
   add-ssh-key      Add or import an SSH public key to DigitalOcean.
   delete-ssh-key   Delete an SSH key registered via tobcloud.
@@ -176,6 +179,29 @@ tobcloud config-ssh <TAB>  # Shows your droplets
 
 The completion dynamically fetches your droplets from DigitalOcean, showing only those tagged with your username.
 
+### Hibernate and Wake (Cost Saving)
+
+DigitalOcean charges for stopped droplets at the full hourly rate. To avoid this, use hibernate/wake:
+
+```bash
+# Hibernate: snapshot the droplet and destroy it (stops billing)
+tobcloud hibernate my-droplet
+
+# Wake: restore the droplet from the snapshot
+tobcloud wake my-droplet
+
+# Delete a hibernated snapshot without restoring
+tobcloud destroy my-droplet
+```
+
+**How it works:**
+1. `hibernate` powers off the droplet, creates a snapshot (`tobcloud-<name>`), then destroys the droplet
+2. `wake` creates a new droplet from the snapshot with the same region and size
+3. Snapshots are tagged with `owner:<username>` and `size:<size-slug>` for tracking
+4. After waking, you're prompted to delete the snapshot (default: yes)
+
+**Note:** Snapshots are billed at $0.06/GB/month, which is typically much cheaper than keeping a droplet running.
+
 ### Cloud-Init Customization
 
 Edit `~/.config/tobcloud/cloud-init.yaml` to customize user setup, package installation, firewall rules, and shell configuration. The template uses Jinja2 syntax with variables `{{ username }}` and `{{ ssh_keys }}`.
@@ -231,7 +257,7 @@ uv run pytest -v           # Verbose output
 uv run pytest -k "test_*"  # Run specific tests
 ```
 
-**Test Coverage**: 81 tests covering API client, configuration validation, and SSH config management.
+**Test Coverage**: 134 tests covering API client, configuration validation, SSH config management, and helper functions.
 
 ### Code Quality
 
@@ -262,7 +288,7 @@ DigitalOcean uses **custom scopes** to control what actions an API token can per
 
 ### Required Scopes for tobcloud
 
-To use all features of tobcloud, your DigitalOcean API token needs these **19 specific scopes**:
+To use all features of tobcloud, your DigitalOcean API token needs these **21 specific scopes**:
 
 #### Account (Read-Only)
 - `account:read` - View account details (used to fetch your email for username)
@@ -289,8 +315,10 @@ To use all features of tobcloud, your DigitalOcean API token needs these **19 sp
 #### Sizes (Read-Only)
 - `sizes:read` - View droplet plan sizes (for interactive prompts)
 
-#### Snapshots (Read-Only)
-- `snapshot:read` - View snapshots (required by other DigitalOcean operations)
+#### Snapshots (Full Management)
+- `snapshot:read` - View snapshots (list, get info for hibernate/wake)
+- `snapshot:create` - Create snapshots (for hibernate command)
+- `snapshot:delete` - Delete snapshots (for wake command cleanup)
 
 #### SSH Keys (Full Management)
 - `ssh_key:read` - View SSH keys (list, check if exists)
@@ -332,11 +360,13 @@ To use all features of tobcloud, your DigitalOcean API token needs these **19 sp
 |---------|----------------|
 | **Initialize config** | `account:read`, `regions:read`, `sizes:read`, `image:read`, `ssh_key:read`, `ssh_key:create`, `project:read` |
 | **Create droplets** | `droplet:create`, `project:update`, `actions:read`, `tag:create` |
-| **List droplets** | `droplet:read`, `tag:read` |
+| **List droplets** | `droplet:read`, `snapshot:read`, `tag:read` |
 | **Show droplet info** | `droplet:read` |
-| **Destroy droplets** | `droplet:delete` |
+| **Destroy droplets** | `droplet:delete`, `snapshot:delete` |
 | **Resize droplets** | `droplet:update`, `sizes:read`, `actions:read` |
 | **Power on/off** | `droplet:update`, `actions:read` |
+| **Hibernate** | `droplet:update`, `droplet:delete`, `snapshot:create`, `actions:read`, `tag:create` |
+| **Wake** | `droplet:create`, `snapshot:read`, `snapshot:delete` |
 | **Manage SSH keys** | `ssh_key:read`, `ssh_key:create`, `ssh_key:update`, `ssh_key:delete` |
 
 For more information, see the [DigitalOcean API Token Scopes documentation](https://docs.digitalocean.com/reference/api/scopes/).
