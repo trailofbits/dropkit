@@ -1553,17 +1553,17 @@ def create(
     # Check for hibernated snapshot with same name
     snapshot_name = get_snapshot_name(name)
     try:
-        snapshots = api.list_snapshots(tag=user_tag)
-        for snapshot in snapshots:
-            if snapshot.get("name") == snapshot_name:
-                console.print(
-                    f"[red]Error: A hibernated snapshot '{snapshot_name}' already exists[/red]"
-                )
-                console.print(
-                    f"[yellow]Use [cyan]tobcloud wake {name}[/cyan] to restore it, or "
-                    f"[cyan]tobcloud destroy {name}[/cyan] to delete the snapshot[/yellow]"
-                )
-                raise typer.Exit(1)
+        snapshot = api.get_snapshot_by_name(snapshot_name, tag=user_tag)
+        if snapshot:
+            console.print(
+                f"[red]Error: A hibernated snapshot '{snapshot_name}' already exists[/red]"
+            )
+            console.print(
+                f"[yellow]Use [cyan]tobcloud wake {name}[/cyan] to restore it, "
+                f"[cyan]tobcloud destroy {name}[/cyan] to delete the snapshot, "
+                f"or choose a different name[/yellow]"
+            )
+            raise typer.Exit(1)
     except DigitalOceanAPIError as e:
         if verbose:
             console.print(f"[dim][DEBUG] Could not check for existing snapshots: {e}[/dim]")
@@ -2166,14 +2166,14 @@ def destroy(droplet_name: str = typer.Argument(..., autocompletion=complete_drop
                 # Found a hibernated snapshot - handle deletion
                 _destroy_hibernated_snapshot(api, snapshot, droplet_name, snapshot_name)
                 return
-            else:
-                # Neither droplet nor snapshot found
-                console.print(
-                    f"[red]Error: No droplet or hibernated snapshot found for '{droplet_name}'[/red]"
-                )
-                console.print(f"[dim]Checked for droplet with tag: {user_tag}[/dim]")
-                console.print(f"[dim]Checked for snapshot named: {snapshot_name}[/dim]")
-                raise typer.Exit(1)
+
+            # Neither droplet nor snapshot found
+            console.print(
+                f"[red]Error: No droplet or hibernated snapshot found for '{droplet_name}'[/red]"
+            )
+            console.print(f"[dim]Checked for droplet with tag: {user_tag}[/dim]")
+            console.print(f"[dim]Checked for snapshot named: {snapshot_name}[/dim]")
+            raise typer.Exit(1)
 
         # Get detailed droplet info for display
         droplet_id = droplet.get("id")
