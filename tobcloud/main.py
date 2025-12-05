@@ -2171,6 +2171,25 @@ def rename(
             console.print("[dim]No rename needed.[/dim]")
             raise typer.Exit(0)
 
+        # Check if new name already exists among user's droplets
+        user_droplets = api.list_droplets(tag_name=get_user_tag(username))
+        for d in user_droplets:
+            if d.get("name") == new_name:
+                console.print(
+                    f"[red]Error:[/red] A droplet with name '[cyan]{new_name}[/cyan]' already exists."
+                )
+                raise typer.Exit(1)
+
+        # Check droplet status - must be active for rename
+        status = droplet.get("status", "unknown")
+        if status != "active":
+            console.print(
+                f"[red]Error:[/red] Droplet '[cyan]{old_name}[/cyan]' "
+                f"is currently [bold]{status}[/bold]."
+            )
+            console.print(f"[dim]Power on the droplet first with: tobcloud on {old_name}[/dim]")
+            raise typer.Exit(1)
+
         # Get detailed droplet info for display
         droplet = api.get_droplet(droplet_id)
 
