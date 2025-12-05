@@ -13,6 +13,7 @@ from tobcloud.main import (
     is_tailscale_ip,
     lock_down_to_tailscale,
     run_tailscale_up,
+    setup_tailscale,
     verify_tailscale_ssh,
 )
 
@@ -351,3 +352,142 @@ class TestInstallTailscaleOnDroplet:
 
         mock_run.side_effect = subprocess.SubprocessError("Connection refused")
         assert install_tailscale_on_droplet("tobcloud.test") is False
+
+
+def create_mock_config(lock_down_firewall: bool = True, auth_timeout: int = 300) -> MagicMock:
+    """Create a mock TobcloudConfig for testing."""
+    config = MagicMock()
+    config.tailscale = MagicMock()
+    config.tailscale.lock_down_firewall = lock_down_firewall
+    config.tailscale.auth_timeout = auth_timeout
+    config.ssh = MagicMock()
+    config.ssh.config_path = "~/.ssh/config"
+    config.ssh.identity_file = "~/.ssh/id_ed25519"
+    return config
+
+
+class TestSetupTailscale:
+    """Tests for setup_tailscale function."""
+
+    @patch("tobcloud.main.verify_tailscale_ssh")
+    @patch("tobcloud.main.lock_down_to_tailscale")
+    @patch("tobcloud.main.check_local_tailscale")
+    @patch("tobcloud.main.add_ssh_host")
+    @patch("tobcloud.main.wait_for_tailscale_ip")
+    @patch("tobcloud.main.run_tailscale_up")
+    def test_already_authenticated_succeeds(
+        self,
+        mock_tailscale_up,
+        mock_wait_ip,
+        mock_add_ssh,
+        mock_check_local,
+        mock_lockdown,
+        mock_verify,
+    ):
+        """Test setup succeeds when Tailscale is already authenticated (no auth URL)."""
+        # No auth URL returned (already authenticated)
+        mock_tailscale_up.return_value = None
+        # But Tailscale IP is available
+        mock_wait_ip.return_value = "100.64.1.1"
+        mock_check_local.return_value = True
+        mock_lockdown.return_value = True
+        mock_verify.return_value = True
+
+        config = create_mock_config()
+        result = setup_tailscale("tobcloud.test", "testuser", config)
+
+        assert result == "100.64.1.1"
+        # Should have called wait_for_tailscale_ip with short timeout
+        mock_wait_ip.assert_called_once_with(
+            "tobcloud.test", timeout=10, poll_interval=2, verbose=False
+        )
+        mock_add_ssh.assert_called_once()
+        mock_lockdown.assert_called_once()
+
+    @patch("tobcloud.main.wait_for_tailscale_ip")
+    @patch("tobcloud.main.run_tailscale_up")
+    def test_no_auth_url_and_not_connected_fails(
+        self,
+        mock_tailscale_up,
+        mock_wait_ip,
+    ):
+        """Test setup fails when no auth URL and Tailscale not connected."""
+        # No auth URL returned
+        mock_tailscale_up.return_value = None
+        # And no Tailscale IP available
+        mock_wait_ip.return_value = None
+
+        config = create_mock_config()
+        result = setup_tailscale("tobcloud.test", "testuser", config)
+
+        assert result is None
+
+    @patch("tobcloud.main.verify_tailscale_ssh")
+    @patch("tobcloud.main.lock_down_to_tailscale")
+    @patch("tobcloud.main.check_local_tailscale")
+    @patch("tobcloud.main.add_ssh_host")
+    @patch("tobcloud.main.wait_for_tailscale_ip")
+    @patch("tobcloud.main.run_tailscale_up")
+    def test_normal_auth_flow_succeeds(
+        self,
+        mock_tailscale_up,
+        mock_wait_ip,
+        mock_add_ssh,
+        mock_check_local,
+        mock_lockdown,
+        mock_verify,
+    ):
+        """Test normal flow with auth URL succeeds."""
+        # Auth URL returned (needs authentication)
+        mock_tailscale_up.return_value = "https://login.tailscale.com/a/abc123"
+        # Tailscale IP available after authentication
+        mock_wait_ip.return_value = "100.64.1.1"
+        mock_check_local.return_value = True
+        mock_lockdown.return_value = True
+        mock_verify.return_value = True
+
+        config = create_mock_config()
+        result = setup_tailscale("tobcloud.test", "testuser", config)
+
+        assert result == "100.64.1.1"
+        # Should have called wait_for_tailscale_ip with full auth_timeout
+        mock_wait_ip.assert_called_once_with("tobcloud.test", timeout=300, verbose=False)
+
+    @patch("tobcloud.main.wait_for_tailscale_ip")
+    @patch("tobcloud.main.run_tailscale_up")
+    def test_auth_timeout_fails(
+        self,
+        mock_tailscale_up,
+        mock_wait_ip,
+    ):
+        """Test setup fails when authentication times out."""
+        # Auth URL returned
+        mock_tailscale_up.return_value = "https://login.tailscale.com/a/abc123"
+        # But no IP received (user didn't authenticate in time)
+        mock_wait_ip.return_value = None
+
+        config = create_mock_config()
+        result = setup_tailscale("tobcloud.test", "testuser", config)
+
+        assert result is None
+
+    @patch("tobcloud.main.check_local_tailscale")
+    @patch("tobcloud.main.add_ssh_host")
+    @patch("tobcloud.main.wait_for_tailscale_ip")
+    @patch("tobcloud.main.run_tailscale_up")
+    def test_skips_lockdown_when_disabled(
+        self,
+        mock_tailscale_up,
+        mock_wait_ip,
+        mock_add_ssh,
+        mock_check_local,
+    ):
+        """Test firewall lockdown is skipped when disabled in config."""
+        mock_tailscale_up.return_value = None
+        mock_wait_ip.return_value = "100.64.1.1"
+
+        config = create_mock_config(lock_down_firewall=False)
+        result = setup_tailscale("tobcloud.test", "testuser", config)
+
+        assert result == "100.64.1.1"
+        mock_check_local.assert_not_called()  # Lockdown logic not entered

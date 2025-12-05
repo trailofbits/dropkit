@@ -915,8 +915,11 @@ def install_tailscale_on_droplet(ssh_hostname: str, verbose: bool = False) -> bo
         )
 
         if verbose:
-            output = result.stdout.decode("utf-8", errors="ignore")
-            console.print(f"[dim][DEBUG] Install output: {output[:500]}...[/dim]")
+            stdout = result.stdout.decode("utf-8", errors="ignore")
+            stderr = result.stderr.decode("utf-8", errors="ignore")
+            console.print(f"[dim][DEBUG] Install stdout: {stdout[:500]}...[/dim]")
+            if stderr:
+                console.print(f"[dim][DEBUG] Install stderr: {stderr[:500]}[/dim]")
             console.print(f"[dim][DEBUG] Install returncode: {result.returncode}[/dim]")
 
         return result.returncode == 0
@@ -958,31 +961,44 @@ def setup_tailscale(
     auth_url = run_tailscale_up(ssh_hostname, verbose)
 
     if not auth_url:
-        console.print("[yellow]⚠[/yellow] Could not start Tailscale authentication")
-        console.print("[dim]Tailscale is installed but not connected.[/dim]")
-        console.print(f"[dim]Connect later with: ssh {ssh_hostname} 'sudo tailscale up'[/dim]")
-        return None
+        # No auth URL - could mean already authenticated or an error
+        # Check if Tailscale is already connected by trying to get IP
+        console.print("[dim]No authentication URL received, checking if already connected...[/dim]")
 
-    # Display auth URL to user
-    console.print("\n[bold yellow]Tailscale Authentication Required[/bold yellow]")
-    console.print("\nOpen this URL in your browser to authenticate:")
-    console.print(f"  [cyan]{auth_url}[/cyan]\n")
-    console.print("[dim]Waiting for you to complete authentication...[/dim]")
+        tailscale_ip = wait_for_tailscale_ip(
+            ssh_hostname, timeout=10, poll_interval=2, verbose=verbose
+        )
 
-    # Poll for Tailscale IP
-    tailscale_ip = wait_for_tailscale_ip(
-        ssh_hostname,
-        timeout=config.tailscale.auth_timeout,
-        verbose=verbose,
-    )
+        if tailscale_ip:
+            console.print(
+                f"[green]✓[/green] Tailscale already connected: [cyan]{tailscale_ip}[/cyan]"
+            )
+        else:
+            console.print("[yellow]⚠[/yellow] Could not connect to Tailscale")
+            console.print("[dim]Tailscale is installed but not connected.[/dim]")
+            console.print(f"[dim]Connect later with: ssh {ssh_hostname} 'sudo tailscale up'[/dim]")
+            return None
+    else:
+        # Normal flow: display auth URL and wait for user to authenticate
+        console.print("\n[bold yellow]Tailscale Authentication Required[/bold yellow]")
+        console.print("\nOpen this URL in your browser to authenticate:")
+        console.print(f"  [cyan]{auth_url}[/cyan]\n")
+        console.print("[dim]Waiting for you to complete authentication...[/dim]")
 
-    if not tailscale_ip:
-        console.print("[yellow]⚠[/yellow] Tailscale authentication timed out")
-        console.print("[dim]You can authenticate later with:[/dim]")
-        console.print(f"[dim]  ssh {ssh_hostname} 'sudo tailscale up'[/dim]")
-        return None
+        # Poll for Tailscale IP
+        tailscale_ip = wait_for_tailscale_ip(
+            ssh_hostname,
+            timeout=config.tailscale.auth_timeout,
+            verbose=verbose,
+        )
 
-    console.print(f"[green]✓[/green] Tailscale connected: [cyan]{tailscale_ip}[/cyan]")
+        if not tailscale_ip:
+            console.print("[yellow]⚠[/yellow] Tailscale authentication timed out")
+            console.print("[dim]You can authenticate later with:[/dim]")
+            console.print(f"[dim]  ssh {ssh_hostname} 'sudo tailscale up'[/dim]")
+            return None
+
+        console.print(f"[green]✓[/green] Tailscale connected: [cyan]{tailscale_ip}[/cyan]")
 
     # Update SSH config with Tailscale IP
     console.print("[dim]Updating SSH config with Tailscale IP...[/dim]")
@@ -2765,8 +2781,8 @@ def enable_tailscale(
                 if not install_tailscale_on_droplet(ssh_hostname, verbose):
                     console.print("[red]Error: Failed to install Tailscale[/red]")
                     console.print(
-                        "[dim]Try manually: ssh {ssh_hostname} "
-                        "'curl -fsSL https://tailscale.com/install.sh | sudo sh'[/dim]"
+                        f"[dim]Try manually: ssh {ssh_hostname} "
+                        f"'curl -fsSL https://tailscale.com/install.sh | sudo sh'[/dim]"
                     )
                     raise typer.Exit(1)
             console.print("[green]✓[/green] Tailscale installed successfully")
