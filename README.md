@@ -304,50 +304,41 @@ DigitalOcean uses **custom scopes** to control what actions an API token can per
 
 ### Required Scopes for tobcloud
 
-To use all features of tobcloud, your DigitalOcean API token needs these **21 specific scopes**:
+To use all features of tobcloud, your DigitalOcean API token needs **23 specific scopes**:
 
-#### Account (Read-Only)
-- `account:read` - View account details (used to fetch your email for username)
+| Category | Scopes | Count |
+|----------|--------|-------|
+| **account** | read | 1 |
+| **actions** | read | 1 |
+| **droplet** | create, read, update, delete, admin | 5 |
+| **image** | create, read, update, delete | 4 |
+| **regions** | read | 1 |
+| **sizes** | read | 1 |
+| **snapshot** | read, delete | 2 |
+| **ssh_key** | create, read, update, delete | 4 |
+| **tag** | create | 1 |
+| **project / tag / vpc** | read | 3 |
+| **Total** | | **23** |
 
-#### Actions (Read-Only)
-- `actions:read` - View action status (monitor resize/power operations)
+#### Scope Details
 
-#### Droplets (Full Management)
-- `droplet:read` - View droplets (list, get info)
-- `droplet:create` - Create droplets
-- `droplet:update` - Modify droplets (resize, power on/off)
-- `droplet:delete` - Delete droplets
+**Fully Scoped Access (19 scopes):**
+- `account:read` - View account details (fetch email for username)
+- `actions:read` - Monitor resize/power operations
+- `droplet:create`, `droplet:read`, `droplet:update`, `droplet:delete`, `droplet:admin` - Full droplet management
+- `image:create`, `image:read`, `image:update`, `image:delete` - Image management (for hibernate/wake snapshots)
+- `regions:read` - View data center regions
+- `sizes:read` - View droplet plan sizes
+- `snapshot:read`, `snapshot:delete` - Snapshot management for hibernate/wake
+- `ssh_key:create`, `ssh_key:read`, `ssh_key:update`, `ssh_key:delete` - SSH key management
 
-#### Images (Read-Only)
-- `image:read` - View images (for interactive prompts)
+**Create Access (1 scope):**
+- `tag:create` - Create tags when creating droplets
 
-#### Projects (Read + Update)
+**Read Access (3 scopes):**
 - `project:read` - View projects (list, get default project)
-- `project:update` - Modify projects (assign droplets to projects)
-
-#### Regions (Read-Only)
-- `regions:read` - View data center regions (for interactive prompts)
-
-#### Sizes (Read-Only)
-- `sizes:read` - View droplet plan sizes (for interactive prompts)
-
-#### Snapshots (Full Management)
-- `snapshot:read` - View snapshots (list, get info for hibernate/wake)
-- `snapshot:create` - Create snapshots (for hibernate command)
-- `snapshot:delete` - Delete snapshots (for wake command cleanup)
-
-#### SSH Keys (Full Management)
-- `ssh_key:read` - View SSH keys (list, check if exists)
-- `ssh_key:create` - Upload SSH keys
-- `ssh_key:update` - Modify SSH keys (update names)
-- `ssh_key:delete` - Delete SSH keys
-
-#### Tags (Create + Read)
-- `tag:read` - Filter droplets by tags (for owner-based filtering)
-- `tag:create` - Create tags when creating droplets (owner, firewall tags)
-
-#### VPC (Read-Only)
-- `vpc:read` - View VPC networks (required by other DigitalOcean operations)
+- `tag:read` - Filter droplets by tags
+- `vpc:read` - View VPC networks
 
 ### How to Create Your Token
 
@@ -357,7 +348,7 @@ To use all features of tobcloud, your DigitalOcean API token needs these **21 sp
 2. Click **Generate New Token**
 3. Give it a descriptive name (e.g., "tobcloud-cli")
 4. Select **Custom Scopes**
-5. Check all 19 scopes listed above
+5. Check all 23 scopes listed above
 6. Set expiration period (or no expiration)
 7. Click **Generate Token**
 
@@ -375,15 +366,15 @@ To use all features of tobcloud, your DigitalOcean API token needs these **21 sp
 | Feature | Required Scopes |
 |---------|----------------|
 | **Initialize config** | `account:read`, `regions:read`, `sizes:read`, `image:read`, `ssh_key:read`, `ssh_key:create`, `project:read` |
-| **Create droplets** | `droplet:create`, `project:update`, `actions:read`, `tag:create` |
+| **Create droplets** | `droplet:create`, `droplet:admin`, `actions:read`, `tag:create`, `tag:read` |
 | **List droplets** | `droplet:read`, `snapshot:read`, `tag:read` |
 | **Show droplet info** | `droplet:read` |
 | **Destroy droplets** | `droplet:delete`, `snapshot:delete` |
 | **Rename droplets** | `droplet:update` |
 | **Resize droplets** | `droplet:update`, `sizes:read`, `actions:read` |
 | **Power on/off** | `droplet:update`, `actions:read` |
-| **Hibernate** | `droplet:update`, `droplet:delete`, `snapshot:create`, `actions:read`, `tag:create` |
-| **Wake** | `droplet:create`, `snapshot:read`, `snapshot:delete` |
+| **Hibernate** | `droplet:update`, `droplet:delete`, `image:create`, `actions:read`, `tag:create` |
+| **Wake** | `droplet:create`, `droplet:admin`, `image:read`, `snapshot:delete`, `tag:read` |
 | **Manage SSH keys** | `ssh_key:read`, `ssh_key:create`, `ssh_key:update`, `ssh_key:delete` |
 
 For more information, see the [DigitalOcean API Token Scopes documentation](https://docs.digitalocean.com/reference/api/scopes/).
