@@ -9,7 +9,7 @@ A CLI tool for managing DigitalOcean droplets for Trail of Bits engineers.
 - **Tailscale VPN integration** for secure remote access (enabled by default)
 - Automatic tagging for security and billing
 - SSH config management
-- Easy droplet lifecycle management (create, list, destroy, resize)
+- Easy droplet lifecycle management (create, list, destroy, resize, hibernate/wake)
 
 ## Technology Stack
 
@@ -40,8 +40,9 @@ tobcloud/
 │   └── templates/
 │       └── default-cloud-init.yaml  # Default cloud-init template
 └── tests/
-    ├── test_api.py             # API client tests (email sanitization)
+    ├── test_api.py             # API client tests (email sanitization, validation)
     ├── test_config.py          # Config and validation tests
+    ├── test_main_helpers.py    # Helper function tests (snapshot names, tags)
     └── test_ssh_config.py      # SSH config manipulation tests
 ```
 
@@ -120,10 +121,12 @@ uv run pytest tests/test_ssh_config.py::TestAddSSHHost::test_empty_file
 uv run pytest -k "validate_ssh_public_key"
 ```
 
-**Test Coverage (81 tests total):**
-- `tests/test_api.py` - 5 tests for DigitalOcean API client
+**Test Coverage (134 tests total):**
+- `tests/test_api.py` - 11 tests for DigitalOcean API client
   - Email sanitization for username generation
   - Special character handling, number prefixes, empty email fallback
+  - Positive integer validation for IDs
+  - Droplet URN generation
 - `tests/test_ssh_config.py` - 28 comprehensive tests for SSH config management
   - Tests for `add_ssh_host`: edge cases, similar names, updates, backup creation
   - Tests for `remove_ssh_host`: removal, edge cases, backup creation
@@ -134,6 +137,10 @@ uv run pytest -k "validate_ssh_public_key"
   - **SSH key validation tests**: Valid keys (RSA, ED25519, ECDSA), private key rejection, empty files, invalid content
   - **Username property tests**: Configured username, fallback to system username, before config loaded
   - Tests empty fields, missing fields, extra fields, type validation, nested validation
+- `tests/test_main_helpers.py` - 19 tests for main module helper functions
+  - Tests for `get_snapshot_name()`: simple names, hyphens, numbers
+  - Tests for `get_droplet_name_from_snapshot()`: valid/invalid snapshot names
+  - Tests for `get_ssh_hostname()`, `get_user_tag()`, `build_droplet_tags()`
 
 ### Manual Testing Commands
 
@@ -170,6 +177,11 @@ uv run tobcloud resize test-droplet --size s-4vcpu-8gb --no-disk  # Without disk
 # Power on/off droplets
 uv run tobcloud on test-droplet   # Power on a droplet
 uv run tobcloud off test-droplet  # Power off a droplet (requires confirmation)
+
+# Hibernate/wake droplets (cost-saving)
+uv run tobcloud hibernate test-droplet  # Snapshot and destroy (stops billing)
+uv run tobcloud wake test-droplet       # Restore from snapshot
+uv run tobcloud destroy test-droplet    # Also works for hibernated snapshots
 
 # SSH key management
 uv run tobcloud list-ssh-keys                    # List registered SSH keys
@@ -288,12 +300,15 @@ username = Config.sanitize_email_for_username("john.doe@trailofbits.com")
    - `find_user_droplet()` - Finds droplet by name with user tag filtering
    - `find_project_by_name_or_id()` - Resolves project name or UUID to (id, name) tuple
    - `get_ssh_hostname()` - Converts droplet name to SSH hostname (`tobcloud.<name>`)
+   - `get_snapshot_name()` - Converts droplet name to snapshot name (`tobcloud-<name>`)
+   - `get_droplet_name_from_snapshot()` - Extracts droplet name from snapshot name
    - `get_user_tag()` - Generates user tag (`owner:<username>`)
    - `build_droplet_tags()` - Builds complete tag list with mandatory + extra tags
    - `register_ssh_keys_with_do()` - Handles SSH key detection, validation, and registration (~120 lines)
    - `wait_for_cloud_init()` - Polls cloud-init status via SSH (~159 lines)
    - `complete_droplet_name()` - Shell completion function for droplet names
    - `complete_project_name()` - Shell completion function for project names
+   - `_destroy_hibernated_snapshot()` - Handles snapshot deletion flow (used by destroy command)
    - `setup_tailscale()` - Full Tailscale setup flow (auth, SSH config, firewall lockdown)
    - `check_local_tailscale()` - Checks if Tailscale is running locally
    - `check_tailscale_installed()` - Checks if Tailscale is installed on a droplet
@@ -453,11 +468,12 @@ tags = config_manager.config.defaults.tags         # List[str]
   - `--tags` extends default tags instead of replacing
   - `--no-tailscale` flag disables Tailscale VPN setup
 
-- [x] `tobcloud list` - List droplets with SSH config status
+- [x] `tobcloud list` - List droplets and hibernated snapshots
   - Filters by `owner:<username>` tag
-  - Shows: name, status, IP address, region, size
-  - Indicates if droplet is in SSH config (✓/✗)
-  - Displays results in formatted table
+  - **Droplets section**: name, status, IP address, region, size, SSH config status (✓/✗)
+  - **Hibernated section**: name, size (GB), region for tobcloud snapshots
+  - Shows summary: "Total: X droplet(s), Y hibernated"
+  - Displays results in formatted tables
 
 - [x] `tobcloud config-ssh <droplet-name>` - Configure SSH for existing droplet
   - Finds droplet by name (filtered by user tag)
@@ -476,13 +492,15 @@ tags = config_manager.config.defaults.tags         # List[str]
   - SSH access status with connection instructions
   - Suggests `config-ssh` if not in SSH config
 
-- [x] `tobcloud destroy <droplet-name>` - Delete droplet (DESTRUCTIVE)
-  - **Safety features**: Double confirmation required
+- [x] `tobcloud destroy <droplet-name>` - Delete droplet or hibernated snapshot (DESTRUCTIVE)
+  - **Safety features**: Double confirmation required for droplets
   - First prompt: "Are you sure you want to destroy this droplet?" (yes/no, defaults to "no")
   - Second prompt: "Type the droplet name to confirm deletion" (must match exactly)
   - Shows comprehensive droplet information before deletion
-  - Only allows deletion of droplets tagged with `owner:<username>` (prevents deleting other people's droplets)
-  - Deletes droplet via DigitalOcean API
+  - Only allows deletion of resources tagged with `owner:<username>`
+  - **Smart fallback**: If no droplet found, checks for hibernated snapshot with same name
+  - For hibernated snapshots: Single yes/no confirmation (simpler flow)
+  - Deletes resource via DigitalOcean API
   - Automatically removes SSH config entry (`tobcloud.<droplet-name>`)
   - Clear success/error messages and cancellation handling
 
@@ -537,10 +555,35 @@ tags = config_manager.config.defaults.tags         # List[str]
   - Only allows powering off droplets tagged with `owner:<username>`
   - Checks if droplet is already off (skips if yes)
   - Shows current status before powering off
+  - **Shows billing warning**: Reminds user DO bills for stopped droplets
+  - Suggests `tobcloud hibernate` as cost-saving alternative
   - **Requires confirmation** before proceeding (yes/no, defaults to no)
   - Initiates power off action via DigitalOcean API
   - Polls action status until complete (2 minute timeout)
   - Shows success message
+
+- [x] `tobcloud hibernate <droplet-name>` - Hibernate droplet (cost-saving)
+  - Only allows hibernating droplets tagged with `owner:<username>`
+  - **Workflow**:
+    1. Power off droplet (if not already off)
+    2. Create snapshot named `tobcloud-<droplet-name>`
+    3. Tag snapshot with `owner:<username>` and `size:<size-slug>`
+    4. Destroy droplet
+    5. Remove SSH config entry
+  - **Existing snapshot handling**: Prompts to overwrite if snapshot already exists
+  - **Error recovery**: If snapshot fails, droplet remains powered off but intact
+  - Shows snapshot creation time and size on completion
+  - Suggests `tobcloud wake <name>` for restoration
+
+- [x] `tobcloud wake <droplet-name>` - Wake hibernated droplet
+  - Checks no droplet with same name exists (error if yes)
+  - Finds hibernated snapshot `tobcloud-<name>` by owner tag
+  - Reads region from snapshot metadata, size from `size:*` tag
+  - Creates new droplet from snapshot image
+  - Waits for droplet to become active
+  - Adds SSH config entry
+  - **Prompts to delete snapshot** (default: yes) to save storage costs
+  - Shows connection instructions on completion
 
 - [x] `tobcloud enable-tailscale <droplet-name>` - Enable Tailscale VPN on existing droplet
   - Only allows modifying droplets tagged with `owner:<username>`
@@ -580,6 +623,11 @@ Key endpoints:
 - `GET /v2/projects/{project_id}` - Get a specific project by UUID
 - `GET /v2/projects/default` - Get the default project for the account
 - `POST /v2/projects/{project_id}/resources` - Assign resources to a project (body: `{"resources": ["do:droplet:12345"]}`)
+- `GET /v2/snapshots` - List snapshots (paginated, filter by `resource_type=droplet`)
+- `GET /v2/snapshots/{snapshot_id}` - Get snapshot by ID
+- `DELETE /v2/snapshots/{snapshot_id}` - Delete snapshot
+- `POST /v2/tags` - Create tag
+- `POST /v2/tags/{tag_name}/resources` - Tag a resource (body: `{"resources": [{"resource_id": "123", "resource_type": "image"}]}`)
 
 **Pagination**: The API uses pagination with `page` and `per_page` query parameters (max 200/page). The `api.py` module automatically handles pagination by following the `links.pages.next` URLs until all results are fetched.
 
@@ -621,6 +669,6 @@ Key endpoints:
   - Failure: `status == "error"` with error details and log file locations
   - Timeout: Shows warning if status check times out
 - **Debugging**: Use `--verbose` flag to see detailed output including cloud-init errors
-- Comprehensive test suite: **81 tests** covering all functionality
+- Comprehensive test suite: **134 tests** covering all functionality
 - **Type hints**: Modern Python 3.11+ syntax (`str | None`, `list[str]`)
 - **Code quality**: Ruff (linter + formatter) + Mypy (type checker)

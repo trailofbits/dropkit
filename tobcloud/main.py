@@ -170,6 +170,35 @@ def get_ssh_hostname(droplet_name: str) -> str:
     return f"tobcloud.{droplet_name}"
 
 
+def get_snapshot_name(droplet_name: str) -> str:
+    """
+    Convert droplet name to snapshot name.
+
+    Args:
+        droplet_name: Name of the droplet
+
+    Returns:
+        Snapshot name with tobcloud prefix (e.g., "tobcloud-my-droplet")
+    """
+    return f"tobcloud-{droplet_name}"
+
+
+def get_droplet_name_from_snapshot(snapshot_name: str) -> str | None:
+    """
+    Extract droplet name from a tobcloud snapshot name.
+
+    Args:
+        snapshot_name: Snapshot name (e.g., "tobcloud-my-droplet")
+
+    Returns:
+        Droplet name if snapshot name is in tobcloud format, None otherwise
+    """
+    prefix = "tobcloud-"
+    if snapshot_name.startswith(prefix):
+        return snapshot_name[len(prefix) :]
+    return None
+
+
 def ensure_ssh_config(
     droplet: dict,
     droplet_name: str,
@@ -1510,6 +1539,36 @@ def create(
     if verbose:
         console.print(f"[dim][DEBUG] Using tags: {tags_list}[/dim]")
 
+    # Check for existing droplet with same name
+    user_tag = get_user_tag(do_username)
+    existing_droplet, _ = find_user_droplet(api, name)
+    if existing_droplet:
+        console.print(f"[red]Error: A droplet named '{name}' already exists[/red]")
+        console.print(
+            f"[yellow]Use [cyan]tobcloud destroy {name}[/cyan] to delete it first, "
+            f"or choose a different name[/yellow]"
+        )
+        raise typer.Exit(1)
+
+    # Check for hibernated snapshot with same name
+    snapshot_name = get_snapshot_name(name)
+    try:
+        snapshot = api.get_snapshot_by_name(snapshot_name, tag=user_tag)
+        if snapshot:
+            console.print(
+                f"[red]Error: A hibernated snapshot '{snapshot_name}' already exists[/red]"
+            )
+            console.print(
+                f"[yellow]Use [cyan]tobcloud wake {name}[/cyan] to restore it, "
+                f"[cyan]tobcloud destroy {name}[/cyan] to delete the snapshot, "
+                f"or choose a different name[/yellow]"
+            )
+            raise typer.Exit(1)
+    except DigitalOceanAPIError as e:
+        if verbose:
+            console.print(f"[dim][DEBUG] Could not check for existing snapshots: {e}[/dim]")
+        # Continue anyway - snapshot check is best-effort
+
     # Get SSH keys
     ssh_keys = config.cloudinit.ssh_keys
 
@@ -1721,7 +1780,7 @@ def create(
 
 @app.command(name="list")
 def list_droplets():
-    """List droplets tagged with owner:<username>."""
+    """List droplets and hibernated snapshots tagged with owner:<username>."""
     try:
         # Load config and API
         config_manager, api = load_config_and_api()
@@ -1736,56 +1795,97 @@ def list_droplets():
 
         tag_name = get_user_tag(username)
 
-        console.print(f"[dim]Fetching droplets with tag: [cyan]{tag_name}[/cyan][/dim]\n")
+        console.print(f"[dim]Fetching resources with tag: [cyan]{tag_name}[/cyan][/dim]\n")
 
         # List droplets
         droplets = api.list_droplets(tag_name=tag_name)
 
-        if not droplets:
-            console.print(f"[yellow]No droplets found with tag: {tag_name}[/yellow]")
-            return
+        if droplets:
+            # Create droplets table
+            console.print("[bold]Droplets:[/bold]")
+            table = Table(show_header=True, header_style="bold cyan")
+            table.add_column("Name", style="white", no_wrap=True)
+            table.add_column("Status", style="white", no_wrap=True)
+            table.add_column("IP Address", style="cyan", no_wrap=True)
+            table.add_column("Region", style="white", no_wrap=True)
+            table.add_column("Size", style="white", no_wrap=True)
+            table.add_column("SSH", style="white", no_wrap=True)
 
-        # Create table
-        table = Table(show_header=True, header_style="bold cyan")
-        table.add_column("Name", style="white", no_wrap=True)
-        table.add_column("Status", style="white", no_wrap=True)
-        table.add_column("IP Address", style="cyan", no_wrap=True)
-        table.add_column("Region", style="white", no_wrap=True)
-        table.add_column("Size", style="white", no_wrap=True)
-        table.add_column("In SSH Config", style="white", no_wrap=True)
+            # Add rows
+            for droplet in droplets:
+                name = droplet.get("name", "N/A")
+                status = droplet.get("status", "N/A")
 
-        # Add rows
-        for droplet in droplets:
-            name = droplet.get("name", "N/A")
-            status = droplet.get("status", "N/A")
+                # Get public IP
+                ip_address = "N/A"
+                v4_networks = droplet.get("networks", {}).get("v4", [])
+                for network in v4_networks:
+                    if network.get("type") == "public":
+                        ip_address = network.get("ip_address", "N/A")
+                        break
 
-            # Get public IP
-            ip_address = "N/A"
-            v4_networks = droplet.get("networks", {}).get("v4", [])
-            for network in v4_networks:
-                if network.get("type") == "public":
-                    ip_address = network.get("ip_address", "N/A")
-                    break
+                region = droplet.get("region", {}).get("slug", "N/A")
+                size = droplet.get("size_slug", "N/A")
 
-            region = droplet.get("region", {}).get("slug", "N/A")
-            size = droplet.get("size_slug", "N/A")
+                # Check if in SSH config
+                ssh_hostname = get_ssh_hostname(name)
+                in_ssh_config = "✓" if host_exists(config.ssh.config_path, ssh_hostname) else "✗"
 
-            # Check if in SSH config
-            ssh_hostname = get_ssh_hostname(name)
-            in_ssh_config = "✓" if host_exists(config.ssh.config_path, ssh_hostname) else "✗"
+                # Color status
+                if status == "active":
+                    status_colored = f"[green]{status}[/green]"
+                elif status == "new":
+                    status_colored = f"[yellow]{status}[/yellow]"
+                else:
+                    status_colored = f"[red]{status}[/red]"
 
-            # Color status
-            if status == "active":
-                status_colored = f"[green]{status}[/green]"
-            elif status == "new":
-                status_colored = f"[yellow]{status}[/yellow]"
-            else:
-                status_colored = f"[red]{status}[/red]"
+                table.add_row(name, status_colored, ip_address, region, size, in_ssh_config)
 
-            table.add_row(name, status_colored, ip_address, region, size, in_ssh_config)
+            console.print(table)
 
-        console.print(table)
-        console.print(f"\n[dim]Total: {len(droplets)} droplet(s)[/dim]")
+        # List hibernated snapshots
+        snapshots = api.list_snapshots(tag=tag_name)
+
+        # Filter to only tobcloud-* snapshots
+        hibernated = [s for s in snapshots if s.get("name", "").startswith("tobcloud-")]
+
+        if hibernated:
+            if droplets:
+                console.print()  # Spacing between tables
+            console.print("[bold]Hibernated:[/bold]")
+            snap_table = Table(show_header=True, header_style="bold cyan")
+            snap_table.add_column("Name", style="white", no_wrap=True)
+            snap_table.add_column("Size", style="white", no_wrap=True)
+            snap_table.add_column("Region", style="white", no_wrap=True)
+
+            for snapshot in hibernated:
+                snapshot_name = snapshot.get("name", "")
+                # Extract droplet name from snapshot name (remove "tobcloud-" prefix)
+                droplet_name = get_droplet_name_from_snapshot(snapshot_name) or snapshot_name
+
+                size_gb = snapshot.get("size_gigabytes", 0)
+                regions = snapshot.get("regions", [])
+                region = regions[0] if regions else "N/A"
+
+                snap_table.add_row(droplet_name, f"{size_gb} GB", region)
+
+            console.print(snap_table)
+            console.print()
+            console.print("[dim]Wake with: tobcloud wake <name>[/dim]")
+
+        # Summary
+        if droplets or hibernated:
+            console.print()
+            parts = []
+            if droplets:
+                parts.append(f"{len(droplets)} droplet(s)")
+            if hibernated:
+                parts.append(f"{len(hibernated)} hibernated")
+            console.print(f"[dim]Total: {', '.join(parts)}[/dim]")
+        else:
+            console.print(
+                f"[yellow]No droplets or hibernated snapshots found with tag: {tag_name}[/yellow]"
+            )
 
     except DigitalOceanAPIError as e:
         console.print(f"[red]Error: {e}[/red]")
@@ -2030,10 +2130,13 @@ def info(droplet_name: str = typer.Argument(..., autocompletion=complete_droplet
 @app.command()
 def destroy(droplet_name: str = typer.Argument(..., autocompletion=complete_droplet_name)):
     """
-    Destroy a droplet (DESTRUCTIVE - requires confirmation).
+    Destroy a droplet or hibernated snapshot (DESTRUCTIVE - requires confirmation).
 
-    This will permanently delete the droplet and remove its SSH config entry.
-    Only droplets tagged with owner:<your-username> can be destroyed.
+    This will permanently delete the droplet (or hibernated snapshot) and remove
+    its SSH config entry. Only resources tagged with owner:<your-username> can be destroyed.
+
+    If no droplet is found, this command will check for a hibernated snapshot
+    with the same name and offer to delete that instead.
     """
     try:
         # Load config and API
@@ -2044,9 +2147,32 @@ def destroy(droplet_name: str = typer.Argument(..., autocompletion=complete_drop
         console.print(f"[dim]Looking for droplet: [cyan]{droplet_name}[/cyan][/dim]\n")
         droplet, username = find_user_droplet(api, droplet_name)
 
-        if not droplet or not username:
-            tag = get_user_tag(username) if username else "owner:<unknown>"
-            console.print(f"[red]Error: Droplet '{droplet_name}' not found with tag {tag}[/red]")
+        # If no droplet found, check for hibernated snapshot
+        if not droplet:
+            # Get username if we don't have it
+            if not username:
+                try:
+                    username = api.get_username()
+                except DigitalOceanAPIError as e:
+                    console.print(f"[red]Error fetching username from DigitalOcean: {e}[/red]")
+                    raise typer.Exit(1)
+
+            # Check for hibernated snapshot
+            snapshot_name = get_snapshot_name(droplet_name)
+            user_tag = get_user_tag(username)
+            snapshot = api.get_snapshot_by_name(snapshot_name, tag=user_tag)
+
+            if snapshot:
+                # Found a hibernated snapshot - handle deletion
+                _destroy_hibernated_snapshot(api, snapshot, droplet_name, snapshot_name)
+                return
+
+            # Neither droplet nor snapshot found
+            console.print(
+                f"[red]Error: No droplet or hibernated snapshot found for '{droplet_name}'[/red]"
+            )
+            console.print(f"[dim]Checked for droplet with tag: {user_tag}[/dim]")
+            console.print(f"[dim]Checked for snapshot named: {snapshot_name}[/dim]")
             raise typer.Exit(1)
 
         # Get detailed droplet info for display
@@ -2148,6 +2274,80 @@ def destroy(droplet_name: str = typer.Argument(..., autocompletion=complete_drop
     except DigitalOceanAPIError as e:
         console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(1)
+
+
+def _destroy_hibernated_snapshot(
+    api: DigitalOceanAPI,
+    snapshot: dict,
+    droplet_name: str,
+    snapshot_name: str,
+) -> None:
+    """
+    Handle destruction of a hibernated snapshot.
+
+    This is called by the destroy command when no droplet is found but a
+    hibernated snapshot exists.
+    """
+    snapshot_id_str = snapshot.get("id")
+    if not snapshot_id_str:
+        console.print("[red]Error: Could not determine snapshot ID[/red]")
+        raise typer.Exit(1)
+    snapshot_id = int(snapshot_id_str)  # API returns string, convert to int
+
+    size_gb = snapshot.get("size_gigabytes", 0)
+    regions = snapshot.get("regions", [])
+    region = regions[0] if regions else "N/A"
+    created_at = snapshot.get("created_at", "N/A")
+
+    # Display snapshot information
+    console.print(
+        Panel.fit(
+            f"[bold red]⚠ DESTROY HIBERNATED SNAPSHOT: {droplet_name}[/bold red]",
+            border_style="red",
+        )
+    )
+
+    console.print("[dim]No active droplet found, but found a hibernated snapshot.[/dim]")
+    console.print()
+
+    info_table = Table(show_header=False, box=None, padding=(0, 2))
+    info_table.add_column(style="dim")
+    info_table.add_column(style="white")
+
+    info_table.add_row("Snapshot name:", snapshot_name)
+    info_table.add_row("Snapshot ID:", str(snapshot_id))
+    info_table.add_row("Size:", f"{size_gb} GB")
+    info_table.add_row("Region:", region)
+    info_table.add_row("Created:", created_at)
+
+    console.print(info_table)
+    console.print()
+
+    # Warning and confirmation
+    console.print("[bold red]⚠ WARNING: This action cannot be undone![/bold red]")
+    console.print("[dim]The hibernated snapshot will be permanently deleted.[/dim]")
+    console.print()
+
+    confirm = Prompt.ask(
+        f"[yellow]Delete hibernated snapshot '{snapshot_name}'?[/yellow]",
+        choices=["yes", "no"],
+        default="no",
+    )
+
+    if confirm != "yes":
+        console.print("[dim]Cancelled.[/dim]")
+        raise typer.Exit(0)
+
+    # Delete snapshot
+    console.print()
+    console.print("[dim]Deleting snapshot...[/dim]")
+    api.delete_snapshot(snapshot_id)
+    console.print("[green]✓[/green] Snapshot deleted")
+
+    console.print()
+    console.print(
+        f"[bold green]Hibernated snapshot '{droplet_name}' successfully destroyed[/bold green]"
+    )
 
 
 @app.command()
@@ -2672,6 +2872,16 @@ def off(droplet_name: str = typer.Argument(..., autocompletion=complete_droplet_
         console.print(f"Current status: [green]{status}[/green]")
         console.print()
 
+        # Show billing warning
+        console.print(
+            "[bold yellow]⚠  Warning:[/bold yellow] DigitalOcean bills for stopped droplets "
+            "at the full hourly rate."
+        )
+        console.print(
+            "   Consider using [cyan]tobcloud hibernate[/cyan] to snapshot and destroy instead."
+        )
+        console.print()
+
         # Confirmation
         confirm = Prompt.ask(
             "[yellow]Are you sure you want to power off this droplet?[/yellow]",
@@ -2705,6 +2915,348 @@ def off(droplet_name: str = typer.Argument(..., autocompletion=complete_droplet_
         console.print("[green]✓[/green] Droplet powered off successfully")
         console.print()
         console.print(f"[bold green]Droplet {droplet_name} is now off[/bold green]")
+
+    except DigitalOceanAPIError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
+
+
+@app.command()
+def hibernate(droplet_name: str = typer.Argument(..., autocompletion=complete_droplet_name)):
+    """
+    Hibernate a droplet (snapshot and destroy to save costs).
+
+    This will create a snapshot of the droplet, then destroy it.
+    You can restore it later with 'tobcloud wake <name>'.
+
+    Only droplets tagged with owner:<your-username> can be hibernated.
+    """
+    try:
+        # Load config and API
+        config_manager, api = load_config_and_api()
+        config = config_manager.config
+
+        # Find the droplet
+        console.print(f"[dim]Looking for droplet: [cyan]{droplet_name}[/cyan][/dim]\n")
+        droplet, username = find_user_droplet(api, droplet_name)
+
+        if not droplet or not username:
+            tag = get_user_tag(username) if username else "owner:<unknown>"
+            console.print(f"[red]Error: Droplet '{droplet_name}' not found with tag {tag}[/red]")
+            raise typer.Exit(1)
+
+        # Get droplet details
+        droplet_id = droplet.get("id")
+        if not droplet_id:
+            console.print("[red]Error: Could not determine droplet ID[/red]")
+            raise typer.Exit(1)
+
+        droplet = api.get_droplet(droplet_id)
+        status = droplet.get("status", "")
+        size_slug = droplet.get("size_slug", "")
+
+        # Generate snapshot name
+        snapshot_name = get_snapshot_name(droplet_name)
+
+        # Check if snapshot already exists
+        user_tag = get_user_tag(username)
+        existing_snapshot = api.get_snapshot_by_name(snapshot_name, tag=user_tag)
+
+        if existing_snapshot:
+            console.print(f"[yellow]⚠[/yellow] Snapshot '{snapshot_name}' already exists.")
+            overwrite = Prompt.ask(
+                "[yellow]Overwrite existing snapshot?[/yellow]",
+                choices=["yes", "no"],
+                default="no",
+            )
+            if overwrite != "yes":
+                console.print("[dim]Aborted.[/dim]")
+                raise typer.Exit(0)
+
+            # Delete existing snapshot
+            console.print("[dim]Deleting existing snapshot...[/dim]")
+            api.delete_snapshot(int(existing_snapshot["id"]))
+            console.print("[green]✓[/green] Existing snapshot deleted")
+
+        # Display header
+        console.print(
+            Panel.fit(
+                f"[bold cyan]HIBERNATE DROPLET: {droplet_name}[/bold cyan]",
+                border_style="cyan",
+            )
+        )
+        console.print("This will snapshot the droplet and then destroy it.")
+        console.print(f"You can restore it later with [cyan]tobcloud wake {droplet_name}[/cyan]")
+        console.print()
+
+        # Confirmation
+        confirm = Prompt.ask(
+            "[yellow]Are you sure?[/yellow]",
+            choices=["yes", "no"],
+            default="no",
+        )
+
+        if confirm != "yes":
+            console.print("[dim]Cancelled.[/dim]")
+            raise typer.Exit(0)
+
+        console.print()
+
+        # Step 1: Power off if not already off
+        if status != "off":
+            console.print("[dim]Powering off droplet...[/dim]")
+            action = api.power_off_droplet(droplet_id)
+            action_id = action.get("id")
+
+            if action_id:
+                with console.status("[cyan]Powering off...[/cyan]"):
+                    api.wait_for_action_complete(action_id, timeout=120)
+            console.print("[green]✓[/green] Droplet powered off")
+        else:
+            console.print("[dim]Droplet already powered off[/dim]")
+
+        # Step 2: Create snapshot
+        console.print(f"\n[dim]Creating snapshot '{snapshot_name}'...[/dim]")
+        start_time = time.time()
+
+        action = api.create_snapshot(droplet_id, snapshot_name)
+        action_id = action.get("id")
+
+        if not action_id:
+            console.print("[red]Error: Failed to get action ID for snapshot[/red]")
+            console.print(
+                "[yellow]⚠[/yellow] Droplet remains powered off but intact. "
+                "Please check DigitalOcean console."
+            )
+            raise typer.Exit(1)
+
+        try:
+            with console.status(
+                "[cyan]Creating snapshot (this may take several minutes)...[/cyan]"
+            ):
+                api.wait_for_action_complete(action_id, timeout=1800)  # 30 minutes max
+
+            elapsed = time.time() - start_time
+            minutes = int(elapsed // 60)
+            seconds = int(elapsed % 60)
+            time_str = f"{minutes}m {seconds}s" if minutes > 0 else f"{seconds}s"
+            console.print(f"[green]✓[/green] Snapshot created (took {time_str})")
+        except DigitalOceanAPIError as e:
+            console.print(f"[red]Error: Snapshot creation failed: {e}[/red]")
+            console.print(
+                "[yellow]⚠[/yellow] Droplet remains powered off but intact. "
+                "You can try again later."
+            )
+            raise typer.Exit(1)
+
+        # Step 3: Tag the snapshot
+        # First, get the snapshot to get its ID
+        snapshot = api.get_snapshot_by_name(snapshot_name)
+        if snapshot:
+            snapshot_id = snapshot.get("id")
+            if snapshot_id:
+                try:
+                    # Create and apply tags
+                    # owner tag
+                    api.create_tag(user_tag)
+                    api.tag_resource(user_tag, str(snapshot_id), "image")
+
+                    # size tag
+                    size_tag = f"size:{size_slug}"
+                    api.create_tag(size_tag)
+                    api.tag_resource(size_tag, str(snapshot_id), "image")
+                except DigitalOceanAPIError as e:
+                    console.print(f"[yellow]⚠[/yellow] Could not tag snapshot (non-critical): {e}")
+
+        # Step 4: Destroy droplet
+        console.print("\n[dim]Destroying droplet...[/dim]")
+        api.delete_droplet(droplet_id)
+        console.print("[green]✓[/green] Droplet destroyed")
+
+        # Step 5: Remove SSH config entry
+        ssh_hostname = get_ssh_hostname(droplet_name)
+        if host_exists(config.ssh.config_path, ssh_hostname):
+            try:
+                remove_ssh_host(config.ssh.config_path, ssh_hostname)
+                console.print("[green]✓[/green] SSH config entry removed")
+            except Exception as e:
+                console.print(f"[yellow]⚠[/yellow] Could not remove SSH config entry: {e}")
+
+        # Summary
+        console.print()
+        console.print(f"[bold green]Droplet '{droplet_name}' is now hibernated.[/bold green]")
+
+        # Show snapshot size if available
+        if snapshot:
+            size_gb = snapshot.get("size_gigabytes", 0)
+            if size_gb:
+                console.print(f"Snapshot size: {size_gb} GB")
+
+        console.print(f"Restore anytime with: [cyan]tobcloud wake {droplet_name}[/cyan]")
+
+    except DigitalOceanAPIError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
+
+
+@app.command()
+def wake(droplet_name: str = typer.Argument(..., help="Name of the hibernated droplet to restore")):
+    """
+    Wake a hibernated droplet (restore from snapshot).
+
+    This will create a new droplet from the hibernated snapshot.
+    After successful restoration, you'll be prompted to delete the snapshot.
+
+    Use 'tobcloud destroy <name>' to delete a hibernated snapshot without restoring.
+    """
+    try:
+        # Load config and API
+        config_manager, api = load_config_and_api()
+        config = config_manager.config
+
+        # Get username
+        try:
+            username = api.get_username()
+        except DigitalOceanAPIError as e:
+            console.print(f"[red]Error fetching username from DigitalOcean: {e}[/red]")
+            raise typer.Exit(1)
+
+        # Check if a droplet with this name already exists
+        existing_droplet, _ = find_user_droplet(api, droplet_name)
+        if existing_droplet:
+            console.print(f"[red]Error: A droplet named '{droplet_name}' already exists.[/red]")
+            console.print("[dim]Destroy or rename the existing droplet first.[/dim]")
+            raise typer.Exit(1)
+
+        # Find the hibernated snapshot
+        snapshot_name = get_snapshot_name(droplet_name)
+        user_tag = get_user_tag(username)
+
+        console.print(f"[dim]Looking for hibernated snapshot: [cyan]{snapshot_name}[/cyan][/dim]\n")
+        snapshot = api.get_snapshot_by_name(snapshot_name, tag=user_tag)
+
+        if not snapshot:
+            console.print(f"[red]Error: No hibernated snapshot found for '{droplet_name}'[/red]")
+            console.print(f"[dim]Expected snapshot name: {snapshot_name}[/dim]")
+            raise typer.Exit(1)
+
+        snapshot_id_str = snapshot.get("id")
+        if not snapshot_id_str:
+            console.print("[red]Error: Could not determine snapshot ID[/red]")
+            raise typer.Exit(1)
+        snapshot_id = int(snapshot_id_str)  # API returns string, convert to int
+
+        # Get snapshot details
+        size_gb = snapshot.get("size_gigabytes", 0)
+        regions = snapshot.get("regions", [])
+        original_region = regions[0] if regions else None
+
+        # Get original size from tag
+        tags = snapshot.get("tags", [])
+        original_size = None
+        for tag in tags:
+            if tag.startswith("size:"):
+                original_size = tag[5:]  # Remove "size:" prefix
+                break
+
+        if not original_region:
+            console.print("[red]Error: Could not determine original region from snapshot[/red]")
+            raise typer.Exit(1)
+
+        if not original_size:
+            console.print(
+                "[yellow]⚠[/yellow] Could not determine original size from snapshot tags."
+            )
+            console.print("[dim]Using default size from config.[/dim]")
+            original_size = config.defaults.size
+
+        # Display snapshot info
+        console.print(f"Found hibernated snapshot: [cyan]{snapshot_name}[/cyan] ({size_gb} GB)")
+        console.print(
+            f"Original config: [cyan]{original_region}[/cyan], [cyan]{original_size}[/cyan]"
+        )
+        console.print()
+
+        # Create droplet from snapshot
+        console.print(f"[dim]Creating droplet '{droplet_name}' from snapshot...[/dim]")
+
+        # Build tags for new droplet
+        tags_list = build_droplet_tags(username, list(config.defaults.extra_tags))
+
+        droplet = api.create_droplet_from_snapshot(
+            name=droplet_name,
+            region=original_region,
+            size=original_size,
+            snapshot_id=snapshot_id,
+            tags=tags_list,
+            ssh_keys=config.cloudinit.ssh_key_ids,
+        )
+
+        droplet_id = droplet.get("id")
+        if not droplet_id:
+            console.print("[red]Error: Failed to get droplet ID from API response[/red]")
+            raise typer.Exit(1)
+
+        console.print(f"[green]✓[/green] Droplet created (ID: [cyan]{droplet_id}[/cyan])")
+
+        # Wait for droplet to become active
+        console.print("[dim]Waiting for droplet to become active...[/dim]")
+
+        with console.status("[cyan]Waiting...[/cyan]"):
+            active_droplet = api.wait_for_droplet_active(droplet_id)
+
+        # Get IP address
+        networks = active_droplet.get("networks", {})
+        v4_networks = networks.get("v4", [])
+        ip_address = None
+
+        for network in v4_networks:
+            if network.get("type") == "public":
+                ip_address = network.get("ip_address")
+                break
+
+        if ip_address:
+            console.print(f"[green]✓[/green] Droplet is active (IP: [cyan]{ip_address}[/cyan])")
+        else:
+            console.print("[green]✓[/green] Droplet is active")
+            console.print("[yellow]⚠[/yellow] Could not determine IP address")
+
+        # Add SSH config entry
+        if ip_address and config.ssh.auto_update:
+            try:
+                console.print("[dim]Configuring SSH...[/dim]")
+                ssh_hostname = get_ssh_hostname(droplet_name)
+                add_ssh_host(
+                    config_path=config.ssh.config_path,
+                    host_name=ssh_hostname,
+                    hostname=ip_address,
+                    user=username,
+                    identity_file=config.ssh.identity_file,
+                )
+                console.print("[green]✓[/green] SSH config updated")
+            except Exception as e:
+                console.print(f"[yellow]⚠[/yellow] Could not update SSH config: {e}")
+
+        # Prompt to delete snapshot
+        console.print()
+        delete_snapshot = Prompt.ask(
+            f"[yellow]Delete snapshot '{snapshot_name}'?[/yellow]",
+            choices=["yes", "no"],
+            default="yes",
+        )
+
+        if delete_snapshot == "yes":
+            api.delete_snapshot(snapshot_id)
+            console.print("[green]✓[/green] Snapshot deleted")
+        else:
+            console.print("[dim]Snapshot kept[/dim]")
+
+        # Summary
+        console.print()
+        console.print(f"[bold green]Droplet '{droplet_name}' is awake![/bold green]")
+        if ip_address:
+            ssh_hostname = get_ssh_hostname(droplet_name)
+            console.print(f"Connect with: [cyan]ssh {ssh_hostname}[/cyan]")
 
     except DigitalOceanAPIError as e:
         console.print(f"[red]Error: {e}[/red]")

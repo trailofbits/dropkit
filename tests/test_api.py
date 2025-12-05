@@ -38,24 +38,41 @@ class TestValidatePositiveInt:
     """Tests for _validate_positive_int method."""
 
     def test_valid_positive_int(self):
-        """Test that positive integers pass validation."""
+        """Test validation passes for positive integer."""
         # Should not raise
         DigitalOceanAPI._validate_positive_int(1, "test_id")
         DigitalOceanAPI._validate_positive_int(100, "test_id")
         DigitalOceanAPI._validate_positive_int(999999, "test_id")
 
-    def test_zero_raises_value_error(self):
-        """Test that zero raises ValueError."""
+    def test_zero_raises_error(self):
+        """Test validation fails for zero."""
         with pytest.raises(ValueError, match="test_id must be a positive integer"):
             DigitalOceanAPI._validate_positive_int(0, "test_id")
 
-    def test_negative_raises_value_error(self):
-        """Test that negative integers raise ValueError."""
+    def test_negative_raises_error(self):
+        """Test validation fails for negative integer."""
         with pytest.raises(ValueError, match="droplet_id must be a positive integer"):
             DigitalOceanAPI._validate_positive_int(-1, "droplet_id")
 
         with pytest.raises(ValueError, match="action_id must be a positive integer"):
             DigitalOceanAPI._validate_positive_int(-100, "action_id")
+
+    def test_error_message_includes_value(self):
+        """Test error message includes the invalid value."""
+        with pytest.raises(ValueError, match="got: -5"):
+            DigitalOceanAPI._validate_positive_int(-5, "snapshot_id")
+
+
+class TestGetDropletUrn:
+    """Tests for get_droplet_urn static method."""
+
+    def test_urn_format(self):
+        """Test URN is in correct format."""
+        assert DigitalOceanAPI.get_droplet_urn(12345) == "do:droplet:12345"
+
+    def test_urn_with_large_id(self):
+        """Test URN with large droplet ID."""
+        assert DigitalOceanAPI.get_droplet_urn(999999999) == "do:droplet:999999999"
 
 
 class TestRenameDroplet:
