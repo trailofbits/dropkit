@@ -1,6 +1,7 @@
 """Main CLI application for tobcloud."""
 
 import json
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -13,7 +14,7 @@ from rich.table import Table
 
 from tobcloud.api import DigitalOceanAPI, DigitalOceanAPIError
 from tobcloud.cloudinit import render_cloud_init
-from tobcloud.config import Config
+from tobcloud.config import Config, TobcloudConfig
 from tobcloud.ssh_config import add_ssh_host, host_exists, remove_ssh_host
 from tobcloud.ui import (
     display_images,
@@ -196,6 +197,57 @@ def get_droplet_name_from_snapshot(snapshot_name: str) -> str | None:
     if snapshot_name.startswith(prefix):
         return snapshot_name[len(prefix) :]
     return None
+
+
+def ensure_ssh_config(
+    droplet: dict,
+    droplet_name: str,
+    username: str,
+    config: TobcloudConfig,
+) -> str:
+    """
+    Ensure SSH config entry exists for a droplet.
+
+    Checks if the SSH config already has an entry for this droplet.
+    If not, extracts the public IP and adds an SSH config entry.
+
+    Args:
+        droplet: Droplet dict from DigitalOcean API
+        droplet_name: Name of the droplet
+        username: Username for SSH connection
+        config: TobcloudConfig instance with SSH settings
+
+    Returns:
+        SSH hostname (e.g., "tobcloud.my-droplet")
+
+    Raises:
+        ValueError: If droplet has no public IP
+    """
+    ssh_hostname = get_ssh_hostname(droplet_name)
+
+    if not host_exists(config.ssh.config_path, ssh_hostname):
+        # Get public IP from droplet networks
+        networks = droplet.get("networks", {})
+        public_ip = None
+        for network in networks.get("v4", []):
+            if network.get("type") == "public":
+                public_ip = network.get("ip_address")
+                break
+
+        if not public_ip:
+            raise ValueError("Could not find public IP for droplet")
+
+        console.print(f"[dim]Adding SSH config for {ssh_hostname}...[/dim]")
+        add_ssh_host(
+            config_path=config.ssh.config_path,
+            host_name=ssh_hostname,
+            hostname=public_ip,
+            user=username,
+            identity_file=config.ssh.identity_file,
+        )
+        console.print(f"[green]✓[/green] Added SSH config: {ssh_hostname} -> {public_ip}")
+
+    return ssh_hostname
 
 
 def get_user_tag(username: str) -> str:
@@ -522,6 +574,516 @@ def wait_for_cloud_init(ssh_hostname: str, verbose: bool = False) -> tuple[bool,
     return cloud_init_done, cloud_init_error
 
 
+# Tailscale helper functions
+
+
+def check_local_tailscale() -> bool:
+    """
+    Check if Tailscale is running and connected on the local machine.
+
+    Returns:
+        True if Tailscale is running and the user is connected to a tailnet
+    """
+    try:
+        result = subprocess.run(
+            ["tailscale", "status", "--json"],
+            capture_output=True,
+            timeout=5,
+        )
+        if result.returncode != 0:
+            return False
+
+        # Parse JSON to check if we're connected
+        status = json.loads(result.stdout.decode("utf-8", errors="ignore"))
+        # BackendState should be "Running" if connected
+        return status.get("BackendState") == "Running"
+    except (FileNotFoundError, subprocess.TimeoutExpired, json.JSONDecodeError):
+        return False
+
+
+def run_tailscale_up(ssh_hostname: str, verbose: bool = False) -> str | None:
+    """
+    Run 'tailscale up' on the droplet and extract the auth URL.
+
+    Args:
+        ssh_hostname: SSH hostname to connect to
+        verbose: Show debug output
+
+    Returns:
+        Auth URL if found, None if tailscale up failed
+    """
+    if verbose:
+        console.print("[dim][DEBUG] Running tailscale up on droplet...[/dim]")
+
+    try:
+        # Run tailscale up with a timeout on the remote side.
+        # tailscale up blocks waiting for authentication, so we use `timeout`
+        # to kill it after 5 seconds - the auth URL is printed immediately.
+        # The `|| true` ensures we don't fail due to timeout's exit code.
+        result = subprocess.run(
+            [
+                "ssh",
+                "-o",
+                "StrictHostKeyChecking=no",
+                "-o",
+                "UserKnownHostsFile=/dev/null",
+                "-o",
+                "ConnectTimeout=10",
+                ssh_hostname,
+                "timeout 5 sudo tailscale up 2>&1 || true",
+            ],
+            capture_output=True,
+            timeout=30,
+        )
+
+        output = result.stdout.decode("utf-8", errors="ignore")
+
+        if verbose:
+            console.print(f"[dim][DEBUG] tailscale up output: {output}[/dim]")
+
+        # Parse auth URL from output
+        # Format: "To authenticate, visit:\n\n\thttps://login.tailscale.com/a/..."
+        for line in output.split("\n"):
+            # Match URL and strip trailing punctuation that's unlikely to be part of URL
+            url_match = re.search(r"https://[^\s]+", line)
+            if url_match:
+                url = url_match.group(0).rstrip(".,;:!?'\")>]}")
+                if "login.tailscale.com" in url or "tailscale.com" in url:
+                    return url
+
+        return None
+
+    except (subprocess.TimeoutExpired, subprocess.SubprocessError) as e:
+        if verbose:
+            console.print(f"[dim][DEBUG] tailscale up failed: {e}[/dim]")
+        return None
+
+
+def is_tailscale_ip(ip: str) -> bool:
+    """
+    Check if an IP address is in the Tailscale CGNAT range.
+
+    Tailscale uses the CGNAT IP range 100.64.0.0/10 (100.64.0.0 - 100.127.255.255).
+
+    Args:
+        ip: IP address string to validate
+
+    Returns:
+        True if the IP is in the Tailscale CGNAT range
+    """
+    try:
+        parts = ip.split(".")
+        if len(parts) != 4:
+            return False
+
+        octets = [int(p) for p in parts]
+
+        # Check all octets are valid (0-255)
+        if not all(0 <= o <= 255 for o in octets):
+            return False
+
+        # Tailscale CGNAT range: 100.64.0.0/10
+        # First octet must be 100
+        # Second octet must be 64-127 (the /10 covers 64 addresses in second octet)
+        return octets[0] == 100 and 64 <= octets[1] <= 127
+
+    except (ValueError, AttributeError):
+        return False
+
+
+def wait_for_tailscale_ip(
+    ssh_hostname: str,
+    timeout: int = 300,
+    poll_interval: int = 5,
+    verbose: bool = False,
+) -> str | None:
+    """
+    Poll for Tailscale IP address after user authenticates.
+
+    Args:
+        ssh_hostname: SSH hostname to connect to
+        timeout: Maximum time to wait in seconds
+        poll_interval: Time between polls in seconds
+        verbose: Show debug output
+
+    Returns:
+        Tailscale IP address if found, None if timeout
+    """
+    start_time = time.time()
+
+    if verbose:
+        console.print(f"[dim][DEBUG] Polling for Tailscale IP (timeout: {timeout}s)...[/dim]")
+
+    while time.time() - start_time < timeout:
+        try:
+            result = subprocess.run(
+                [
+                    "ssh",
+                    "-o",
+                    "StrictHostKeyChecking=no",
+                    "-o",
+                    "UserKnownHostsFile=/dev/null",
+                    "-o",
+                    "ConnectTimeout=5",
+                    "-o",
+                    "BatchMode=yes",
+                    ssh_hostname,
+                    "tailscale ip -4 2>/dev/null",
+                ],
+                capture_output=True,
+                timeout=15,
+            )
+
+            output = result.stdout.decode("utf-8", errors="ignore").strip()
+
+            # Validate it's a valid Tailscale CGNAT IP (100.64.0.0/10 range)
+            if output and is_tailscale_ip(output):
+                if verbose:
+                    console.print(f"[dim][DEBUG] Got Tailscale IP: {output}[/dim]")
+                return output
+
+        except (subprocess.TimeoutExpired, subprocess.SubprocessError):
+            pass
+
+        if verbose:
+            elapsed = time.time() - start_time
+            console.print(
+                f"[dim][DEBUG] Waiting for Tailscale auth ({elapsed:.0f}s elapsed)...[/dim]"
+            )
+
+        time.sleep(poll_interval)
+
+    return None
+
+
+def lock_down_to_tailscale(ssh_hostname: str, verbose: bool = False) -> bool:
+    """
+    Lock down UFW to only allow traffic on the tailscale0 interface.
+
+    This resets UFW and configures it to only allow inbound traffic
+    on the Tailscale interface, effectively blocking all public access.
+
+    Args:
+        ssh_hostname: SSH hostname to connect to (should use Tailscale IP now)
+        verbose: Show debug output
+
+    Returns:
+        True if all UFW commands succeeded, False if any command failed
+    """
+    if verbose:
+        console.print("[dim][DEBUG] Locking down UFW to tailscale0 only...[/dim]")
+
+    try:
+        # UFW commands to lock down to Tailscale only
+        # These must all succeed for proper firewall lockdown
+        commands = [
+            ("sudo ufw --force reset", "reset UFW"),
+            ("sudo ufw allow in on tailscale0", "allow tailscale0 traffic"),
+            ("sudo ufw default deny incoming", "deny incoming by default"),
+            ("sudo ufw default allow outgoing", "allow outgoing by default"),
+            ('echo "y" | sudo ufw enable', "enable UFW"),
+        ]
+
+        for cmd, description in commands:
+            result = subprocess.run(
+                [
+                    "ssh",
+                    "-o",
+                    "StrictHostKeyChecking=no",
+                    "-o",
+                    "UserKnownHostsFile=/dev/null",
+                    "-o",
+                    "ConnectTimeout=10",
+                    ssh_hostname,
+                    cmd,
+                ],
+                capture_output=True,
+                timeout=30,
+            )
+
+            if verbose:
+                console.print(f"[dim][DEBUG] {cmd}: returncode={result.returncode}[/dim]")
+
+            # Check return code - any failure means firewall is in unknown state
+            if result.returncode != 0:
+                stderr = result.stderr.decode("utf-8", errors="ignore").strip()
+                if verbose:
+                    console.print(
+                        f"[dim][DEBUG] UFW command failed to {description}: {stderr}[/dim]"
+                    )
+                return False
+
+        return True
+
+    except (subprocess.TimeoutExpired, subprocess.SubprocessError) as e:
+        if verbose:
+            console.print(f"[dim][DEBUG] Failed to lock down UFW: {e}[/dim]")
+        return False
+
+
+def verify_tailscale_ssh(
+    tailscale_ip: str,
+    username: str,
+    identity_file: str,
+    verbose: bool = False,
+) -> bool:
+    """
+    Verify SSH access works via Tailscale IP.
+
+    Args:
+        tailscale_ip: Tailscale IP address to connect to
+        username: SSH username
+        identity_file: SSH identity file path
+        verbose: Show debug output
+
+    Returns:
+        True if SSH works, False otherwise
+    """
+    try:
+        result = subprocess.run(
+            [
+                "ssh",
+                "-o",
+                "StrictHostKeyChecking=no",
+                "-o",
+                "UserKnownHostsFile=/dev/null",
+                "-o",
+                "ConnectTimeout=10",
+                "-o",
+                "BatchMode=yes",
+                "-i",
+                identity_file,
+                f"{username}@{tailscale_ip}",
+                "echo 'SSH via Tailscale working'",
+            ],
+            capture_output=True,
+            timeout=15,
+        )
+
+        if verbose:
+            console.print(
+                f"[dim][DEBUG] Tailscale SSH verify: returncode={result.returncode}[/dim]"
+            )
+
+        return result.returncode == 0
+
+    except (subprocess.TimeoutExpired, subprocess.SubprocessError):
+        return False
+
+
+def check_tailscale_installed(ssh_hostname: str, verbose: bool = False) -> bool:
+    """
+    Check if Tailscale is installed on a droplet.
+
+    Args:
+        ssh_hostname: SSH hostname to connect to
+        verbose: Show debug output
+
+    Returns:
+        True if Tailscale is installed, False otherwise
+    """
+    try:
+        result = subprocess.run(
+            [
+                "ssh",
+                "-o",
+                "StrictHostKeyChecking=no",
+                "-o",
+                "UserKnownHostsFile=/dev/null",
+                "-o",
+                "ConnectTimeout=10",
+                "-o",
+                "BatchMode=yes",
+                ssh_hostname,
+                "which tailscale",
+            ],
+            capture_output=True,
+            timeout=15,
+        )
+
+        if verbose:
+            console.print(f"[dim][DEBUG] which tailscale: returncode={result.returncode}[/dim]")
+
+        return result.returncode == 0
+
+    except (subprocess.TimeoutExpired, subprocess.SubprocessError):
+        return False
+
+
+def install_tailscale_on_droplet(ssh_hostname: str, verbose: bool = False) -> bool:
+    """
+    Install Tailscale on a droplet via SSH.
+
+    Uses the official Tailscale install script.
+
+    Args:
+        ssh_hostname: SSH hostname to connect to
+        verbose: Show debug output
+
+    Returns:
+        True if installation succeeded, False otherwise
+    """
+    if verbose:
+        console.print("[dim][DEBUG] Installing Tailscale on droplet...[/dim]")
+
+    try:
+        result = subprocess.run(
+            [
+                "ssh",
+                "-o",
+                "StrictHostKeyChecking=no",
+                "-o",
+                "UserKnownHostsFile=/dev/null",
+                "-o",
+                "ConnectTimeout=10",
+                ssh_hostname,
+                "curl -fsSL https://tailscale.com/install.sh | sudo sh",
+            ],
+            capture_output=True,
+            timeout=120,  # Installation may take a while
+        )
+
+        if verbose:
+            stdout = result.stdout.decode("utf-8", errors="ignore")
+            stderr = result.stderr.decode("utf-8", errors="ignore")
+            console.print(f"[dim][DEBUG] Install stdout: {stdout[:500]}...[/dim]")
+            if stderr:
+                console.print(f"[dim][DEBUG] Install stderr: {stderr[:500]}[/dim]")
+            console.print(f"[dim][DEBUG] Install returncode: {result.returncode}[/dim]")
+
+        return result.returncode == 0
+
+    except (subprocess.TimeoutExpired, subprocess.SubprocessError) as e:
+        if verbose:
+            console.print(f"[dim][DEBUG] Install failed: {e}[/dim]")
+        return False
+
+
+def setup_tailscale(
+    ssh_hostname: str,
+    username: str,
+    config: TobcloudConfig,
+    verbose: bool = False,
+) -> str | None:
+    """
+    Set up Tailscale VPN on a droplet after cloud-init completes.
+
+    This function handles the full Tailscale setup flow:
+    1. Run `tailscale up` and extract auth URL
+    2. Display auth URL to user for browser authentication
+    3. Poll for Tailscale IP after authentication
+    4. Update SSH config with Tailscale IP
+    5. Optionally lock down firewall to Tailscale only
+
+    Args:
+        ssh_hostname: SSH hostname to connect to (e.g., "tobcloud.my-droplet")
+        username: Username for SSH config
+        config: TobcloudConfig instance with tailscale and ssh settings
+        verbose: Show debug output
+
+    Returns:
+        Tailscale IP address if setup succeeded, None otherwise
+    """
+    console.print("\n[bold]Setting up Tailscale VPN[/bold]")
+
+    # Run tailscale up and get auth URL
+    auth_url = run_tailscale_up(ssh_hostname, verbose)
+
+    if not auth_url:
+        # No auth URL - could mean already authenticated or an error
+        # Check if Tailscale is already connected by trying to get IP
+        console.print("[dim]No authentication URL received, checking if already connected...[/dim]")
+
+        tailscale_ip = wait_for_tailscale_ip(
+            ssh_hostname, timeout=10, poll_interval=2, verbose=verbose
+        )
+
+        if tailscale_ip:
+            console.print(
+                f"[green]✓[/green] Tailscale already connected: [cyan]{tailscale_ip}[/cyan]"
+            )
+        else:
+            console.print("[yellow]⚠[/yellow] Could not connect to Tailscale")
+            console.print("[dim]Tailscale is installed but not connected.[/dim]")
+            console.print(f"[dim]Connect later with: ssh {ssh_hostname} 'sudo tailscale up'[/dim]")
+            return None
+    else:
+        # Normal flow: display auth URL and wait for user to authenticate
+        console.print("\n[bold yellow]Tailscale Authentication Required[/bold yellow]")
+        console.print("\nOpen this URL in your browser to authenticate:")
+        console.print(f"  [cyan]{auth_url}[/cyan]\n")
+        console.print("[dim]Waiting for you to complete authentication...[/dim]")
+
+        # Poll for Tailscale IP
+        tailscale_ip = wait_for_tailscale_ip(
+            ssh_hostname,
+            timeout=config.tailscale.auth_timeout,
+            verbose=verbose,
+        )
+
+        if not tailscale_ip:
+            console.print("[yellow]⚠[/yellow] Tailscale authentication timed out")
+            console.print("[dim]You can authenticate later with:[/dim]")
+            console.print(f"[dim]  ssh {ssh_hostname} 'sudo tailscale up'[/dim]")
+            return None
+
+        console.print(f"[green]✓[/green] Tailscale connected: [cyan]{tailscale_ip}[/cyan]")
+
+    # Update SSH config with Tailscale IP
+    console.print("[dim]Updating SSH config with Tailscale IP...[/dim]")
+    try:
+        add_ssh_host(
+            config_path=config.ssh.config_path,
+            host_name=ssh_hostname,
+            hostname=tailscale_ip,
+            user=username,
+            identity_file=config.ssh.identity_file,
+        )
+        console.print(
+            f"[green]✓[/green] Updated SSH config: [cyan]{ssh_hostname}[/cyan] -> {tailscale_ip}"
+        )
+    except OSError as e:
+        console.print(f"[yellow]⚠[/yellow] Could not update SSH config: {e}")
+        console.print(
+            f"[dim]You can connect manually: ssh -i {config.ssh.identity_file} "
+            f"{username}@{tailscale_ip}[/dim]"
+        )
+
+    # Lock down firewall if configured
+    if config.tailscale.lock_down_firewall:
+        if check_local_tailscale():
+            console.print("[dim]Locking down firewall to Tailscale only...[/dim]")
+            if lock_down_to_tailscale(ssh_hostname, verbose):
+                console.print("[green]✓[/green] Firewall locked down to Tailscale")
+            else:
+                console.print("[yellow]⚠[/yellow] Could not lock down firewall")
+
+            # Verify SSH via Tailscale
+            if verify_tailscale_ssh(tailscale_ip, username, config.ssh.identity_file, verbose):
+                console.print("[green]✓[/green] Verified SSH access via Tailscale")
+            else:
+                console.print(
+                    "[yellow]⚠[/yellow] SSH verification failed - you may need to wait a moment"
+                )
+        else:
+            console.print(
+                "[yellow]⚠[/yellow] Local Tailscale not running - skipping firewall lockdown"
+            )
+            console.print(
+                "[dim]Public SSH access remains available. Start Tailscale locally and run:[/dim]"
+            )
+            console.print(
+                f"[dim]  ssh {ssh_hostname} "
+                "'sudo ufw --force reset && "
+                "sudo ufw allow in on tailscale0 && "
+                "sudo ufw default deny incoming && "
+                "sudo ufw default allow outgoing && "
+                "sudo ufw --force enable'[/dim]"
+            )
+
+    return tailscale_ip
+
+
 def find_user_droplet(api: DigitalOceanAPI, droplet_name: str) -> tuple[dict | None, str | None]:
     """
     Find a droplet by name, filtered by current user's tag.
@@ -838,6 +1400,9 @@ def create(
         help="Project name or ID to assign droplet to",
         autocompletion=complete_project_name,
     ),
+    no_tailscale: bool = typer.Option(
+        False, "--no-tailscale", help="Disable Tailscale VPN setup for this droplet"
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show verbose debug output"),
 ) -> None:
     """
@@ -1044,10 +1609,15 @@ def create(
     console.print(table)
     console.print()
 
+    # Determine if Tailscale should be enabled
+    tailscale_enabled = not no_tailscale and config.tailscale.enabled
+
     # Render cloud-init
     try:
         console.print("[dim]Rendering cloud-init template...[/dim]")
-        user_data = render_cloud_init(template_path, username, full_name, email, ssh_keys)
+        user_data = render_cloud_init(
+            template_path, username, full_name, email, ssh_keys, tailscale_enabled
+        )
 
         if verbose:
             console.print("\n[dim][DEBUG] Rendered cloud-init template:[/dim]")
@@ -1162,23 +1732,40 @@ def create(
             # Wait for cloud-init to complete using helper function
             cloud_init_done, cloud_init_error = wait_for_cloud_init(ssh_hostname, verbose)
 
-        # Show summary based on cloud-init status
+            # Tailscale setup (if enabled and cloud-init succeeded)
+            tailscale_ip = None
+            if tailscale_enabled and cloud_init_done:
+                tailscale_ip = setup_tailscale(ssh_hostname, username, config, verbose)
+
+        # Show summary based on cloud-init and Tailscale status
         console.print()
-        if cloud_init_done:
+        if tailscale_enabled and tailscale_ip:
+            console.print("[bold green]Droplet ready with Tailscale VPN![/bold green]")
+            console.print("\n[bold]Connect via Tailscale with:[/bold]")
+            console.print(f"  [cyan]ssh {ssh_hostname}[/cyan]")
+            if not config.tailscale.lock_down_firewall or not check_local_tailscale():
+                console.print("\n[bold]Or via public IP:[/bold]")
+                console.print(f"  [cyan]ssh {username}@{ip_address}[/cyan]")
+        elif cloud_init_done:
             console.print("[bold green]Droplet created successfully![/bold green]")
             console.print("\n[bold]Droplet is fully ready! Connect with:[/bold]")
+            if ip_address:
+                console.print(f"  [cyan]ssh {ssh_hostname}[/cyan]")
+                console.print(f"  or: [cyan]ssh {username}@{ip_address}[/cyan]")
         elif cloud_init_error:
             console.print("[bold yellow]Droplet created with cloud-init errors[/bold yellow]")
             console.print(
                 "\n[bold]The droplet is running but needs investigation. Connect with:[/bold]"
             )
+            if ip_address:
+                console.print(f"  [cyan]ssh {ssh_hostname}[/cyan]")
+                console.print(f"  or: [cyan]ssh {username}@{ip_address}[/cyan]")
         else:
             console.print("[bold green]Droplet created successfully![/bold green]")
             console.print("\n[bold]Connect with:[/bold]")
-
-        if ip_address:
-            console.print(f"  [cyan]ssh {ssh_hostname}[/cyan]")
-            console.print(f"  or: [cyan]ssh {username}@{ip_address}[/cyan]")
+            if ip_address:
+                console.print(f"  [cyan]ssh {ssh_hostname}[/cyan]")
+                console.print(f"  or: [cyan]ssh {username}@{ip_address}[/cyan]")
 
         if ip_address and not cloud_init_done and not cloud_init_error:
             console.print(
@@ -1761,6 +2348,165 @@ def _destroy_hibernated_snapshot(
     console.print(
         f"[bold green]Hibernated snapshot '{droplet_name}' successfully destroyed[/bold green]"
     )
+
+
+@app.command()
+def rename(
+    old_name: str = typer.Argument(..., autocompletion=complete_droplet_name),
+    new_name: str = typer.Argument(..., help="New name for the droplet"),
+):
+    """
+    Rename a droplet (requires confirmation).
+
+    This will rename the droplet and update the SSH config entry.
+    Only droplets tagged with owner:<your-username> can be renamed.
+    """
+    try:
+        # Load config and API
+        config_manager, api = load_config_and_api()
+        config = config_manager.config
+
+        # Find the droplet
+        console.print(f"[dim]Looking for droplet: [cyan]{old_name}[/cyan][/dim]\n")
+        droplet, username = find_user_droplet(api, old_name)
+
+        if not droplet or not username:
+            tag = get_user_tag(username) if username else "owner:<unknown>"
+            console.print(f"[red]Error: Droplet '{old_name}' not found with tag {tag}[/red]")
+            raise typer.Exit(1)
+
+        # Get droplet ID
+        droplet_id = droplet.get("id")
+        if not droplet_id:
+            console.print("[red]Error: Could not determine droplet ID[/red]")
+            raise typer.Exit(1)
+
+        # Check if new name is same as old name
+        if old_name == new_name:
+            console.print(f"[yellow]New name is the same as current name ({old_name})[/yellow]")
+            console.print("[dim]No rename needed.[/dim]")
+            raise typer.Exit(0)
+
+        # Check if new name already exists among user's droplets
+        user_droplets = api.list_droplets(tag_name=get_user_tag(username))
+        for d in user_droplets:
+            if d.get("name") == new_name:
+                console.print(
+                    f"[red]Error:[/red] A droplet with name '[cyan]{new_name}[/cyan]' already exists."
+                )
+                raise typer.Exit(1)
+
+        # Check droplet status - must be active for rename
+        status = droplet.get("status", "unknown")
+        if status != "active":
+            console.print(
+                f"[red]Error:[/red] Droplet '[cyan]{old_name}[/cyan]' "
+                f"is currently [bold]{status}[/bold]."
+            )
+            console.print(f"[dim]Power on the droplet first with: tobcloud on {old_name}[/dim]")
+            raise typer.Exit(1)
+
+        # Get detailed droplet info for display
+        droplet = api.get_droplet(droplet_id)
+
+        # Get IP address for SSH config update
+        ip_address = None
+        v4_networks = droplet.get("networks", {}).get("v4", [])
+        for network in v4_networks:
+            if network.get("type") == "public":
+                ip_address = network.get("ip_address")
+                break
+
+        # Display droplet information
+        console.print(
+            Panel.fit(
+                "[bold cyan]RENAME DROPLET[/bold cyan]",
+                border_style="cyan",
+            )
+        )
+
+        info_table = Table(show_header=False, box=None, padding=(0, 2))
+        info_table.add_column(style="dim")
+        info_table.add_column(style="white")
+
+        info_table.add_row("Current name:", f"[cyan]{old_name}[/cyan]")
+        info_table.add_row("New name:", f"[green]{new_name}[/green]")
+        info_table.add_row("ID:", str(droplet_id))
+        if ip_address:
+            info_table.add_row("IP:", ip_address)
+        info_table.add_row("Status:", droplet.get("status", "unknown"))
+
+        console.print(info_table)
+        console.print()
+
+        # Show SSH config change
+        old_ssh_hostname = get_ssh_hostname(old_name)
+        new_ssh_hostname = get_ssh_hostname(new_name)
+        console.print(f"[dim]SSH config will change: {old_ssh_hostname} → {new_ssh_hostname}[/dim]")
+        console.print()
+
+        # Confirmation
+        confirm = Prompt.ask(
+            "[yellow]Are you sure you want to rename this droplet?[/yellow]",
+            choices=["yes", "no"],
+            default="no",
+        )
+
+        if confirm != "yes":
+            console.print("[dim]Cancelled.[/dim]")
+            raise typer.Exit(0)
+
+        # Perform rename via API
+        console.print()
+        console.print("[dim]Renaming droplet...[/dim]")
+
+        action = api.rename_droplet(droplet_id, new_name)
+
+        # Wait for rename action to complete
+        action_id = action.get("id")
+        if action_id:
+            api.wait_for_action_complete(action_id, timeout=60, poll_interval=2)
+
+        console.print(f"[green]✓[/green] Droplet renamed to [cyan]{new_name}[/cyan]")
+
+        # Update SSH config
+        if host_exists(config.ssh.config_path, old_ssh_hostname):
+            try:
+                # Remove old SSH entry
+                remove_ssh_host(config.ssh.config_path, old_ssh_hostname)
+                console.print(
+                    f"[green]✓[/green] Removed old SSH config entry: [dim]{old_ssh_hostname}[/dim]"
+                )
+
+                # Add new SSH entry if we have the IP
+                if ip_address:
+                    add_ssh_host(
+                        config_path=config.ssh.config_path,
+                        host_name=new_ssh_hostname,
+                        hostname=ip_address,
+                        user=username,
+                        identity_file=config.ssh.identity_file,
+                    )
+                    console.print(
+                        f"[green]✓[/green] Added new SSH config entry: [cyan]{new_ssh_hostname}[/cyan]"
+                    )
+            except Exception as e:
+                console.print(f"[yellow]⚠[/yellow] Could not update SSH config: {e}")
+                console.print(
+                    f"[dim]Run 'tobcloud config-ssh {new_name}' to configure SSH manually[/dim]"
+                )
+        else:
+            console.print(f"[dim]SSH config entry for {old_ssh_hostname} not found (skipped)[/dim]")
+
+        console.print()
+        console.print(f"[bold green]Droplet successfully renamed to {new_name}[/bold green]")
+        if ip_address and host_exists(config.ssh.config_path, new_ssh_hostname):
+            console.print("\n[bold]Connect with:[/bold]")
+            console.print(f"  [cyan]ssh {new_ssh_hostname}[/cyan]")
+
+    except DigitalOceanAPIError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
 
 
 @app.command()
@@ -2511,6 +3257,112 @@ def wake(droplet_name: str = typer.Argument(..., help="Name of the hibernated dr
         if ip_address:
             ssh_hostname = get_ssh_hostname(droplet_name)
             console.print(f"Connect with: [cyan]ssh {ssh_hostname}[/cyan]")
+
+    except DigitalOceanAPIError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
+
+
+@app.command(name="enable-tailscale")
+def enable_tailscale(
+    droplet_name: str = typer.Argument(..., autocompletion=complete_droplet_name),
+    no_lockdown: bool = typer.Option(
+        False, "--no-lockdown", help="Don't lock down firewall to Tailscale only"
+    ),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show debug output"),
+):
+    """
+    Enable Tailscale VPN on an existing droplet.
+
+    This command sets up Tailscale on a droplet that was created without it
+    (using --no-tailscale) or on older droplets.
+
+    The command will:
+    1. Install Tailscale if not already installed
+    2. Start Tailscale and display auth URL for browser login
+    3. Update SSH config with Tailscale IP after authentication
+    4. Lock down firewall to only allow Tailscale traffic (unless --no-lockdown)
+
+    Only droplets tagged with owner:<your-username> can be modified.
+    """
+    try:
+        # Load config and API
+        config_manager, api = load_config_and_api()
+
+        # Find the droplet
+        console.print(f"[dim]Looking for droplet: [cyan]{droplet_name}[/cyan][/dim]\n")
+        droplet, username = find_user_droplet(api, droplet_name)
+
+        if not droplet or not username:
+            tag = get_user_tag(username) if username else "owner:<unknown>"
+            console.print(f"[red]Error: Droplet '{droplet_name}' not found with tag {tag}[/red]")
+            raise typer.Exit(1)
+
+        # Check droplet status
+        status = droplet.get("status", "")
+        if status != "active":
+            console.print(
+                f"[red]Error: Droplet must be active to enable Tailscale "
+                f"(current status: {status})[/red]"
+            )
+            console.print("[dim]Use 'tobcloud on' to power on the droplet first.[/dim]")
+            raise typer.Exit(1)
+
+        # Ensure SSH config exists for this droplet
+        try:
+            ssh_hostname = ensure_ssh_config(droplet, droplet_name, username, config_manager.config)
+        except ValueError as e:
+            console.print(f"[red]Error: {e}[/red]")
+            raise typer.Exit(1)
+
+        # Show panel
+        console.print(
+            Panel.fit(
+                f"[bold cyan]ENABLE TAILSCALE: {droplet_name}[/bold cyan]",
+                border_style="cyan",
+            )
+        )
+
+        # Check if Tailscale is already installed
+        console.print("[dim]Checking if Tailscale is installed...[/dim]")
+        if check_tailscale_installed(ssh_hostname, verbose):
+            console.print("[green]✓[/green] Tailscale is already installed")
+        else:
+            console.print("[dim]Installing Tailscale...[/dim]")
+            with console.status("[cyan]Installing Tailscale (this may take a minute)...[/cyan]"):
+                if not install_tailscale_on_droplet(ssh_hostname, verbose):
+                    console.print("[red]Error: Failed to install Tailscale[/red]")
+                    console.print(
+                        f"[dim]Try manually: ssh {ssh_hostname} "
+                        f"'curl -fsSL https://tailscale.com/install.sh | sudo sh'[/dim]"
+                    )
+                    raise typer.Exit(1)
+            console.print("[green]✓[/green] Tailscale installed successfully")
+
+        # Handle --no-lockdown by temporarily modifying config
+        config = config_manager.config
+        if no_lockdown:
+            # Override lock_down_firewall setting
+            config.tailscale.lock_down_firewall = False
+
+        # Run the Tailscale setup flow
+        tailscale_ip = setup_tailscale(
+            ssh_hostname=ssh_hostname,
+            username=username,
+            config=config,
+            verbose=verbose,
+        )
+
+        if tailscale_ip:
+            console.print()
+            console.print(f"[bold green]Tailscale enabled on {droplet_name}![/bold green]")
+            console.print(f"Connect via: [cyan]ssh {ssh_hostname}[/cyan]")
+        else:
+            console.print()
+            console.print(f"[yellow]Tailscale setup incomplete for {droplet_name}[/yellow]")
+            console.print(
+                f"[dim]You can complete setup later: ssh {ssh_hostname} 'sudo tailscale up'[/dim]"
+            )
 
     except DigitalOceanAPIError as e:
         console.print(f"[red]Error: {e}[/red]")

@@ -77,6 +77,18 @@ class SSHConfig(BaseModel):
     identity_file: str = Field(..., description="SSH identity file path")
 
 
+class TailscaleConfig(BaseModel):
+    """Tailscale VPN configuration."""
+
+    enabled: bool = Field(default=True, description="Enable Tailscale by default for new droplets")
+    lock_down_firewall: bool = Field(
+        default=True, description="Reset UFW to only allow traffic on tailscale0 interface"
+    )
+    auth_timeout: int = Field(
+        default=300, ge=30, description="Timeout in seconds for Tailscale authentication (min: 30)"
+    )
+
+
 class TobcloudConfig(BaseModel):
     """Main tobcloud configuration."""
 
@@ -86,6 +98,7 @@ class TobcloudConfig(BaseModel):
     defaults: DefaultsConfig
     cloudinit: CloudInitConfig
     ssh: SSHConfig
+    tailscale: TailscaleConfig = Field(default_factory=TailscaleConfig)
 
 
 class Config:

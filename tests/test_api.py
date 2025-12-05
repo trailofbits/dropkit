@@ -54,6 +54,9 @@ class TestValidatePositiveInt:
         with pytest.raises(ValueError, match="droplet_id must be a positive integer"):
             DigitalOceanAPI._validate_positive_int(-1, "droplet_id")
 
+        with pytest.raises(ValueError, match="action_id must be a positive integer"):
+            DigitalOceanAPI._validate_positive_int(-100, "action_id")
+
     def test_error_message_includes_value(self):
         """Test error message includes the invalid value."""
         with pytest.raises(ValueError, match="got: -5"):
@@ -70,3 +73,19 @@ class TestGetDropletUrn:
     def test_urn_with_large_id(self):
         """Test URN with large droplet ID."""
         assert DigitalOceanAPI.get_droplet_urn(999999999) == "do:droplet:999999999"
+
+
+class TestRenameDroplet:
+    """Tests for rename_droplet method validation."""
+
+    def test_rename_droplet_invalid_id_zero(self):
+        """Test that rename_droplet raises ValueError for zero droplet_id."""
+        api = DigitalOceanAPI("fake-token")
+        with pytest.raises(ValueError, match="droplet_id must be a positive integer"):
+            api.rename_droplet(0, "new-name")
+
+    def test_rename_droplet_invalid_id_negative(self):
+        """Test that rename_droplet raises ValueError for negative droplet_id."""
+        api = DigitalOceanAPI("fake-token")
+        with pytest.raises(ValueError, match="droplet_id must be a positive integer"):
+            api.rename_droplet(-1, "new-name")

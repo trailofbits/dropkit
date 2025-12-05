@@ -472,6 +472,26 @@ class DigitalOceanAPI:
         self._validate_positive_int(droplet_id, "droplet_id")
         self._request("DELETE", f"/droplets/{droplet_id}")
 
+    def rename_droplet(self, droplet_id: int, new_name: str) -> dict[str, Any]:
+        """
+        Rename a droplet.
+
+        Args:
+            droplet_id: Droplet ID
+            new_name: New name for the droplet
+
+        Returns:
+            Action object with id, status, etc.
+
+        Raises:
+            ValueError: If droplet_id is not positive
+            DigitalOceanAPIError: If rename fails
+        """
+        self._validate_positive_int(droplet_id, "droplet_id")
+        payload = {"type": "rename", "name": new_name}
+        response = self._request("POST", f"/droplets/{droplet_id}/actions", json=payload)
+        return response.get("action", {})
+
     def resize_droplet(self, droplet_id: int, size: str, disk: bool = True) -> dict[str, Any]:
         """
         Resize a droplet (requires power off, causes downtime).
