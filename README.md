@@ -6,6 +6,7 @@ A command-line tool for managing DigitalOcean droplets with automated setup, SSH
 
 - 🚀 **Quick droplet creation** with cloud-init automation
 - 🔑 **Automatic SSH configuration** - just run `ssh tobcloud.<droplet-name>`
+- 🔐 **Tailscale VPN** - secure access via Tailscale (enabled by default)
 - 👤 **User management** - automatically creates your user account on droplets
 - 🏷️ **Smart tagging** - organizes droplets by owner for easy filtering
 - 🔒 **Security-first** - SSH key validation, confirmation prompts for destructive operations
@@ -18,6 +19,7 @@ A command-line tool for managing DigitalOcean droplets with automated setup, SSH
 - **DigitalOcean account** with an API token ([create one here](https://cloud.digitalocean.com/account/api/tokens))
 - **SSH key pair** (usually `~/.ssh/id_ed25519.pub` or `~/.ssh/id_rsa.pub`)
 - **uv** package manager ([install instructions](https://github.com/astral-sh/uv))
+- **Tailscale** (optional but recommended) - install from [tailscale.com/download](https://tailscale.com/download)
 
 ## Installation
 
@@ -79,9 +81,19 @@ tobcloud create my-first-droplet
 
 # Assign to a specific project (by name or ID)
 tobcloud create my-droplet --project "My Project"
+
+# Create without Tailscale VPN
+tobcloud create my-droplet --no-tailscale
 ```
 
-The tool will create the droplet, wait for it to become active, add SSH configuration automatically, and wait for cloud-init to complete.
+The tool will:
+1. Create the droplet and wait for it to become active
+2. Add SSH configuration automatically
+3. Wait for cloud-init to complete
+4. **Tailscale setup** (enabled by default):
+   - Display an auth URL for you to authenticate in your browser
+   - Update SSH config with your Tailscale IP
+   - Lock down the firewall to only allow Tailscale traffic
 
 ### 3. Connect via SSH
 
@@ -104,10 +116,12 @@ Commands:
   list             List droplets tagged with owner:<username>.
   config-ssh       Configure SSH for an existing droplet.
   info             Show detailed information about a droplet.
+  rename           Rename a droplet (requires confirmation).
   destroy          Destroy a droplet (DESTRUCTIVE - requires confirmation).
   resize           Resize a droplet (causes downtime - requires power off).
   on               Power on a droplet.
   off              Power off a droplet (requires confirmation).
+  enable-tailscale Enable Tailscale VPN on an existing droplet.
   list-ssh-keys    List SSH keys registered via tobcloud.
   add-ssh-key      Add or import an SSH public key to DigitalOcean.
   delete-ssh-key   Delete an SSH key registered via tobcloud.
@@ -166,12 +180,14 @@ tobcloud --install-completion bash
 After installation, restart your shell or source your configuration file. You can then use tab completion with commands that accept droplet names:
 
 ```bash
-tobcloud info <TAB>        # Shows your droplets
-tobcloud destroy <TAB>     # Shows your droplets
-tobcloud resize <TAB>      # Shows your droplets
-tobcloud on <TAB>          # Shows your droplets
-tobcloud off <TAB>         # Shows your droplets
-tobcloud config-ssh <TAB>  # Shows your droplets
+tobcloud info <TAB>             # Shows your droplets
+tobcloud rename <TAB>           # Shows your droplets
+tobcloud destroy <TAB>          # Shows your droplets
+tobcloud resize <TAB>           # Shows your droplets
+tobcloud on <TAB>               # Shows your droplets
+tobcloud off <TAB>              # Shows your droplets
+tobcloud config-ssh <TAB>       # Shows your droplets
+tobcloud enable-tailscale <TAB> # Shows your droplets
 ```
 
 The completion dynamically fetches your droplets from DigitalOcean, showing only those tagged with your username.
@@ -335,6 +351,7 @@ To use all features of tobcloud, your DigitalOcean API token needs these **19 sp
 | **List droplets** | `droplet:read`, `tag:read` |
 | **Show droplet info** | `droplet:read` |
 | **Destroy droplets** | `droplet:delete` |
+| **Rename droplets** | `droplet:update` |
 | **Resize droplets** | `droplet:update`, `sizes:read`, `actions:read` |
 | **Power on/off** | `droplet:update`, `actions:read` |
 | **Manage SSH keys** | `ssh_key:read`, `ssh_key:create`, `ssh_key:update`, `ssh_key:delete` |

@@ -6,6 +6,7 @@ A CLI tool for managing DigitalOcean droplets for Trail of Bits engineers.
 
 `tobcloud` simplifies creating and managing DigitalOcean droplets with:
 - Pre-configured cloud-init templates (user creation, SSH keys, firewall, zsh setup)
+- **Tailscale VPN integration** for secure remote access (enabled by default)
 - Automatic tagging for security and billing
 - SSH config management
 - Easy droplet lifecycle management (create, list, destroy, resize)
@@ -293,6 +294,14 @@ username = Config.sanitize_email_for_username("john.doe@trailofbits.com")
    - `wait_for_cloud_init()` - Polls cloud-init status via SSH (~159 lines)
    - `complete_droplet_name()` - Shell completion function for droplet names
    - `complete_project_name()` - Shell completion function for project names
+   - `setup_tailscale()` - Full Tailscale setup flow (auth, SSH config, firewall lockdown)
+   - `check_local_tailscale()` - Checks if Tailscale is running locally
+   - `check_tailscale_installed()` - Checks if Tailscale is installed on a droplet
+   - `install_tailscale_on_droplet()` - Installs Tailscale on droplet via SSH
+   - `run_tailscale_up()` - Runs `tailscale up` on droplet, extracts auth URL
+   - `wait_for_tailscale_ip()` - Polls for Tailscale IP after authentication
+   - `lock_down_to_tailscale()` - Resets UFW to only allow tailscale0 traffic
+   - `verify_tailscale_ssh()` - Verifies SSH access works via Tailscale IP
 
    **Benefits**: Single source of truth, easier maintenance, reduced code duplication
 
@@ -302,7 +311,7 @@ username = Config.sanitize_email_for_username("john.doe@trailofbits.com")
    - Filters droplets by current user's tag (`owner:<username>`)
    - Silently fails on errors to prevent breaking the CLI
    - Supports case-insensitive prefix matching
-   - Used by commands: `info`, `destroy`, `config-ssh`, `resize`, `on`, `off`
+   - Used by commands: `info`, `destroy`, `config-ssh`, `resize`, `on`, `off`, `enable-tailscale`
    - Enabled via `tobcloud --install-completion zsh` (or bash/fish)
 
    **Implementation details**:
@@ -341,6 +350,46 @@ username = Config.sanitize_email_for_username("john.doe@trailofbits.com")
    - Create command accepts project name or UUID via `--project` flag (with autocompletion)
    - Name resolution is case-insensitive, matches by name first
 
+13. **Tailscale VPN Integration**:
+   - **Enabled by default** for all new droplets
+   - Provides secure VPN access without exposing public SSH
+   - Disable with `--no-tailscale` flag on `tobcloud create`
+
+   **Setup flow**:
+   1. Cloud-init installs Tailscale via official install script
+   2. After cloud-init completes, tobcloud SSHes to droplet via public IP
+   3. Runs `sudo tailscale up` and extracts auth URL
+   4. Displays auth URL to user terminal for browser authentication
+   5. Polls for Tailscale IP (100.x.x.x) after user authenticates
+   6. Updates SSH config with Tailscale IP
+   7. Locks down UFW to only allow traffic on tailscale0 interface
+   8. Verifies SSH access works via Tailscale
+
+   **Configuration** (`config.tailscale`):
+   ```yaml
+   tailscale:
+     enabled: true             # Enable Tailscale by default
+     lock_down_firewall: true  # Reset UFW to tailscale0 only
+     auth_timeout: 300         # Seconds to wait for authentication
+   ```
+
+   **UFW lockdown** (blocks ALL public traffic):
+   ```bash
+   sudo ufw --force reset
+   sudo ufw allow in on tailscale0
+   sudo ufw default deny incoming
+   sudo ufw default allow outgoing
+   sudo ufw --force enable
+   ```
+
+   **Safety features**:
+   - Verifies local Tailscale is running before locking down firewall
+   - If local Tailscale not running, keeps public SSH open
+   - Shows manual lockdown command if skipped
+   - Auth timeout keeps public IP in SSH config with manual instructions
+
+   **Prerequisite**: Tailscale must be installed on your local machine
+
 ### Pydantic Configuration Models
 
 The configuration system uses Pydantic `BaseModel` for strict validation:
@@ -349,6 +398,7 @@ The configuration system uses Pydantic `BaseModel` for strict validation:
 - **`DefaultsConfig`**: Validates region, size, image slugs (non-empty strings)
 - **`CloudInitConfig`**: Validates template path and SSH keys (min 1 key required)
 - **`SSHConfig`**: Validates SSH config path and identity file
+- **`TailscaleConfig`**: Tailscale VPN settings (enabled, lock_down_firewall, auth_timeout)
 - **`TobcloudConfig`**: Main config that composes all sub-configs with `extra='forbid'`
 
 **Benefits:**
@@ -392,9 +442,16 @@ tags = config_manager.config.defaults.tags         # List[str]
   - Waits for droplet to become active
   - Automatically adds SSH config entry (uses hostname alias)
   - Waits for cloud-init completion (checks JSON status == "done")
+  - **Tailscale VPN** (enabled by default):
+    - Installs Tailscale during cloud-init
+    - Runs `tailscale up` and displays auth URL for browser login
+    - Updates SSH config with Tailscale IP after authentication
+    - Locks down firewall to only allow traffic on tailscale0 interface
+    - Use `--no-tailscale` to skip Tailscale setup
   - Supports custom region, size, image, user via CLI flags
   - `--verbose` flag shows debug output and rendered cloud-init
   - `--tags` extends default tags instead of replacing
+  - `--no-tailscale` flag disables Tailscale VPN setup
 
 - [x] `tobcloud list` - List droplets with SSH config status
   - Filters by `owner:<username>` tag
@@ -484,6 +541,18 @@ tags = config_manager.config.defaults.tags         # List[str]
   - Initiates power off action via DigitalOcean API
   - Polls action status until complete (2 minute timeout)
   - Shows success message
+
+- [x] `tobcloud enable-tailscale <droplet-name>` - Enable Tailscale VPN on existing droplet
+  - Only allows modifying droplets tagged with `owner:<username>`
+  - Droplet must be active (powered on)
+  - Installs Tailscale if not already installed via official script
+  - Runs `tailscale up` and displays auth URL for browser login
+  - Polls for Tailscale IP after authentication
+  - Updates SSH config with Tailscale IP
+  - Optionally locks down firewall to Tailscale only
+  - **Options**:
+    - `--no-lockdown` - Skip firewall lockdown (keep public SSH access)
+    - `--verbose` / `-v` - Show debug output
 
 ## DigitalOcean API Endpoints
 
