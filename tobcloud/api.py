@@ -732,15 +732,17 @@ class DigitalOceanAPI:
         List snapshots, optionally filtered by tag.
 
         Args:
-            tag: Optional tag to filter by (e.g., 'owner:myname')
+            tag: Optional tag to filter by (e.g., 'owner:myname').
+                 Filtering is done client-side since the DO API doesn't support tag filtering.
 
         Returns:
             List of snapshot objects
         """
         extra_params: dict[str, str] = {"resource_type": "droplet"}
+        snapshots = self._get_paginated("/snapshots", "snapshots", extra_params=extra_params)
         if tag:
-            extra_params["tag_name"] = tag
-        return self._get_paginated("/snapshots", "snapshots", extra_params=extra_params)
+            snapshots = [s for s in snapshots if tag in s.get("tags", [])]
+        return snapshots
 
     def get_snapshot(self, snapshot_id: int) -> dict[str, Any] | None:
         """

@@ -1843,7 +1843,7 @@ def list_droplets():
 
             console.print(table)
 
-        # List hibernated snapshots
+        # List hibernated snapshots (filtered by owner tag in list_snapshots)
         snapshots = api.list_snapshots(tag=tag_name)
 
         # Filter to only tobcloud-* snapshots
