@@ -1844,10 +1844,15 @@ def list_droplets():
             console.print(table)
 
         # List hibernated snapshots
-        snapshots = api.list_snapshots(tag=tag_name)
+        # Note: DO API doesn't support tag_name filter for snapshots, so we filter client-side
+        snapshots = api.list_snapshots()
 
-        # Filter to only tobcloud-* snapshots
-        hibernated = [s for s in snapshots if s.get("name", "").startswith("tobcloud-")]
+        # Filter to only tobcloud-* snapshots owned by this user
+        hibernated = [
+            s
+            for s in snapshots
+            if s.get("name", "").startswith("tobcloud-") and tag_name in s.get("tags", [])
+        ]
 
         if hibernated:
             if droplets:
