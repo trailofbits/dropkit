@@ -15,6 +15,7 @@ from rich.table import Table
 from tobcloud.api import DigitalOceanAPI, DigitalOceanAPIError
 from tobcloud.cloudinit import render_cloud_init
 from tobcloud.config import Config, TobcloudConfig
+from tobcloud.lock import requires_lock
 from tobcloud.ssh_config import add_ssh_host, host_exists, remove_ssh_host
 from tobcloud.ui import (
     display_images,
@@ -1161,6 +1162,7 @@ def find_project_by_name_or_id(
 
 
 @app.command()
+@requires_lock("init")
 def init(
     force: bool = typer.Option(
         False,
@@ -1384,6 +1386,7 @@ def init(
 
 
 @app.command()
+@requires_lock("create")
 def create(
     name: str | None = typer.Argument(None, help="Name for the droplet"),
     region: str | None = typer.Option(None, "--region", "-r", help="Region slug"),
@@ -1898,6 +1901,7 @@ def list_droplets():
 
 
 @app.command()
+@requires_lock("config-ssh")
 def config_ssh(
     droplet_name: str = typer.Argument(..., autocompletion=complete_droplet_name),
     user: str | None = typer.Option(None, "--user", "-u", help="SSH username"),
@@ -2133,6 +2137,7 @@ def info(droplet_name: str = typer.Argument(..., autocompletion=complete_droplet
 
 
 @app.command()
+@requires_lock("destroy")
 def destroy(droplet_name: str = typer.Argument(..., autocompletion=complete_droplet_name)):
     """
     Destroy a droplet or hibernated snapshot (DESTRUCTIVE - requires confirmation).
@@ -2356,6 +2361,7 @@ def _destroy_hibernated_snapshot(
 
 
 @app.command()
+@requires_lock("rename")
 def rename(
     old_name: str = typer.Argument(..., autocompletion=complete_droplet_name),
     new_name: str = typer.Argument(..., help="New name for the droplet"),
@@ -2515,6 +2521,7 @@ def rename(
 
 
 @app.command()
+@requires_lock("resize")
 def resize(
     droplet_name: str = typer.Argument(..., autocompletion=complete_droplet_name),
     size: str | None = typer.Option(None, "--size", "-s", help="New size slug (e.g., s-4vcpu-8gb)"),
@@ -2765,6 +2772,7 @@ def resize(
 
 
 @app.command()
+@requires_lock("on")
 def on(droplet_name: str = typer.Argument(..., autocompletion=complete_droplet_name)):
     """
     Power on a droplet.
@@ -2835,6 +2843,7 @@ def on(droplet_name: str = typer.Argument(..., autocompletion=complete_droplet_n
 
 
 @app.command()
+@requires_lock("off")
 def off(droplet_name: str = typer.Argument(..., autocompletion=complete_droplet_name)):
     """
     Power off a droplet (requires confirmation).
@@ -2927,6 +2936,7 @@ def off(droplet_name: str = typer.Argument(..., autocompletion=complete_droplet_
 
 
 @app.command()
+@requires_lock("hibernate")
 def hibernate(droplet_name: str = typer.Argument(..., autocompletion=complete_droplet_name)):
     """
     Hibernate a droplet (snapshot and destroy to save costs).
@@ -3105,6 +3115,7 @@ def hibernate(droplet_name: str = typer.Argument(..., autocompletion=complete_dr
 
 
 @app.command()
+@requires_lock("wake")
 def wake(droplet_name: str = typer.Argument(..., help="Name of the hibernated droplet to restore")):
     """
     Wake a hibernated droplet (restore from snapshot).
@@ -3269,6 +3280,7 @@ def wake(droplet_name: str = typer.Argument(..., help="Name of the hibernated dr
 
 
 @app.command(name="enable-tailscale")
+@requires_lock("enable-tailscale")
 def enable_tailscale(
     droplet_name: str = typer.Argument(..., autocompletion=complete_droplet_name),
     no_lockdown: bool = typer.Option(
@@ -3431,6 +3443,7 @@ def list_ssh_keys_cmd():
 
 
 @app.command(name="add-ssh-key")
+@requires_lock("add-ssh-key")
 def add_ssh_key_cmd(
     key_path: str = typer.Argument(..., help="Path to SSH public key file"),
 ):
@@ -3549,6 +3562,7 @@ def add_ssh_key_cmd(
 
 
 @app.command(name="delete-ssh-key")
+@requires_lock("delete-ssh-key")
 def delete_ssh_key_cmd(
     key_name: str = typer.Argument(..., help="SSH key name to delete"),
 ):

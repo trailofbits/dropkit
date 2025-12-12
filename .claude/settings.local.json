@@ -9,7 +9,9 @@
       "Bash(./lint.sh:*)",
       "Bash(uv run tobcloud --help:*)",
       "Bash(uv run tobcloud on --help:*)",
-      "Bash(uv run tobcloud off --help:*)"
+      "Bash(uv run tobcloud off --help:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ],
     "deny": [],
     "ask": []
