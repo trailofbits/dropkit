@@ -179,9 +179,10 @@ uv run tobcloud on test-droplet   # Power on a droplet
 uv run tobcloud off test-droplet  # Power off a droplet (requires confirmation)
 
 # Hibernate/wake droplets (cost-saving)
-uv run tobcloud hibernate test-droplet  # Snapshot and destroy (stops billing)
-uv run tobcloud wake test-droplet       # Restore from snapshot
-uv run tobcloud destroy test-droplet    # Also works for hibernated snapshots
+uv run tobcloud hibernate test-droplet              # Snapshot and destroy (stops billing)
+uv run tobcloud hibernate --continue test-droplet   # Resume timed-out hibernate
+uv run tobcloud wake test-droplet                   # Restore from snapshot
+uv run tobcloud destroy test-droplet                # Also works for hibernated snapshots
 
 # SSH key management
 uv run tobcloud list-ssh-keys                    # List registered SSH keys
@@ -309,6 +310,8 @@ username = Config.sanitize_email_for_username("john.doe@trailofbits.com")
    - `complete_droplet_name()` - Shell completion function for droplet names
    - `complete_project_name()` - Shell completion function for project names
    - `_destroy_hibernated_snapshot()` - Handles snapshot deletion flow (used by destroy command)
+   - `find_snapshot_action()` - Finds most recent snapshot action for a droplet
+   - `_complete_hibernate()` - Completes hibernate after snapshot (tag, destroy, cleanup)
    - `setup_tailscale()` - Full Tailscale setup flow (auth, SSH config, firewall lockdown)
    - `check_local_tailscale()` - Checks if Tailscale is running locally
    - `check_tailscale_installed()` - Checks if Tailscale is installed on a droplet
@@ -572,6 +575,10 @@ tags = config_manager.config.defaults.tags         # List[str]
     5. Remove SSH config entry
   - **Existing snapshot handling**: Prompts to overwrite if snapshot already exists
   - **Error recovery**: If snapshot fails, droplet remains powered off but intact
+  - **--continue flag**: Resume a timed-out hibernate operation
+    - Finds in-progress snapshot action and waits for completion
+    - Then continues with tagging, destroying, and cleanup
+    - Use when snapshot creation times out (60 min limit)
   - Shows snapshot creation time and size on completion
   - Suggests `tobcloud wake <name>` for restoration
 

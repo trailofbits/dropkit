@@ -75,6 +75,22 @@ class TestGetDropletUrn:
         assert DigitalOceanAPI.get_droplet_urn(999999999) == "do:droplet:999999999"
 
 
+class TestListDropletActions:
+    """Tests for list_droplet_actions method validation."""
+
+    def test_list_droplet_actions_invalid_id_zero(self):
+        """Test that list_droplet_actions raises ValueError for zero droplet_id."""
+        api = DigitalOceanAPI("fake-token")
+        with pytest.raises(ValueError, match="droplet_id must be a positive integer"):
+            api.list_droplet_actions(0)
+
+    def test_list_droplet_actions_invalid_id_negative(self):
+        """Test that list_droplet_actions raises ValueError for negative droplet_id."""
+        api = DigitalOceanAPI("fake-token")
+        with pytest.raises(ValueError, match="droplet_id must be a positive integer"):
+            api.list_droplet_actions(-1)
+
+
 class TestRenameDroplet:
     """Tests for rename_droplet method validation."""
 

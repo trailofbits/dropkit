@@ -1,7 +1,10 @@
 """Tests for main module helper functions."""
 
+from unittest.mock import MagicMock
+
 from tobcloud.main import (
     build_droplet_tags,
+    find_snapshot_action,
     get_droplet_name_from_snapshot,
     get_snapshot_name,
     get_ssh_hostname,
@@ -108,3 +111,57 @@ class TestBuildDropletTags:
         """Test with None extra tags."""
         tags = build_droplet_tags("john", None)
         assert tags == ["owner:john", "firewall"]
+
+
+class TestFindSnapshotAction:
+    """Tests for find_snapshot_action function."""
+
+    def test_finds_snapshot_action(self):
+        """Test finding a snapshot action in the actions list."""
+        mock_api = MagicMock()
+        mock_api.list_droplet_actions.return_value = [
+            {"id": 1, "type": "power_off", "status": "completed"},
+            {"id": 2, "type": "snapshot", "status": "in-progress"},
+            {"id": 3, "type": "power_on", "status": "completed"},
+        ]
+
+        result = find_snapshot_action(mock_api, 12345)
+
+        assert result is not None
+        assert result["id"] == 2
+        assert result["type"] == "snapshot"
+        mock_api.list_droplet_actions.assert_called_once_with(12345)
+
+    def test_returns_first_snapshot_action(self):
+        """Test that it returns the first (most recent) snapshot action."""
+        mock_api = MagicMock()
+        mock_api.list_droplet_actions.return_value = [
+            {"id": 10, "type": "snapshot", "status": "in-progress"},
+            {"id": 5, "type": "snapshot", "status": "completed"},
+        ]
+
+        result = find_snapshot_action(mock_api, 12345)
+
+        assert result is not None
+        assert result["id"] == 10
+
+    def test_returns_none_when_no_snapshot_action(self):
+        """Test returning None when no snapshot action exists."""
+        mock_api = MagicMock()
+        mock_api.list_droplet_actions.return_value = [
+            {"id": 1, "type": "power_off", "status": "completed"},
+            {"id": 2, "type": "power_on", "status": "completed"},
+        ]
+
+        result = find_snapshot_action(mock_api, 12345)
+
+        assert result is None
+
+    def test_returns_none_when_empty_actions(self):
+        """Test returning None when actions list is empty."""
+        mock_api = MagicMock()
+        mock_api.list_droplet_actions.return_value = []
+
+        result = find_snapshot_action(mock_api, 12345)
+
+        assert result is None

@@ -5,6 +5,7 @@ import re
 import subprocess
 import time
 from pathlib import Path
+from typing import Any
 
 import typer
 from rich.console import Console
@@ -197,6 +198,24 @@ def get_droplet_name_from_snapshot(snapshot_name: str) -> str | None:
     prefix = "tobcloud-"
     if snapshot_name.startswith(prefix):
         return snapshot_name[len(prefix) :]
+    return None
+
+
+def find_snapshot_action(api: DigitalOceanAPI, droplet_id: int) -> dict[str, Any] | None:
+    """
+    Find the most recent snapshot action for a droplet.
+
+    Args:
+        api: DigitalOcean API client
+        droplet_id: Droplet ID
+
+    Returns:
+        Most recent snapshot action dict, or None if not found
+    """
+    actions = api.list_droplet_actions(droplet_id)
+    for action in actions:
+        if action.get("type") == "snapshot":
+            return action
     return None
 
 
@@ -2286,6 +2305,64 @@ def destroy(droplet_name: str = typer.Argument(..., autocompletion=complete_drop
         raise typer.Exit(1)
 
 
+def _complete_hibernate(
+    api: DigitalOceanAPI,
+    config: TobcloudConfig,
+    droplet_id: int,
+    droplet_name: str,
+    snapshot_name: str,
+    username: str,
+    size_slug: str,
+) -> None:
+    """
+    Complete hibernate after snapshot is done (tag, destroy, cleanup, success message).
+
+    This handles steps 8-11 of the hibernate flow:
+    - Tag the snapshot with owner and size
+    - Destroy the droplet
+    - Remove SSH config entry
+    - Print success message
+    """
+    user_tag = get_user_tag(username)
+
+    # Tag the snapshot
+    snapshot = api.get_snapshot_by_name(snapshot_name)
+    if snapshot:
+        snapshot_id = snapshot.get("id")
+        if snapshot_id:
+            try:
+                api.create_tag(user_tag)
+                api.tag_resource(user_tag, str(snapshot_id), "image")
+                size_tag = f"size:{size_slug}"
+                api.create_tag(size_tag)
+                api.tag_resource(size_tag, str(snapshot_id), "image")
+            except DigitalOceanAPIError as e:
+                console.print(f"[yellow]⚠[/yellow] Could not tag snapshot (non-critical): {e}")
+
+    # Destroy droplet
+    console.print("\n[dim]Destroying droplet...[/dim]")
+    api.delete_droplet(droplet_id)
+    console.print("[green]✓[/green] Droplet destroyed")
+
+    # Remove SSH config entry
+    ssh_hostname = get_ssh_hostname(droplet_name)
+    if host_exists(config.ssh.config_path, ssh_hostname):
+        try:
+            remove_ssh_host(config.ssh.config_path, ssh_hostname)
+            console.print("[green]✓[/green] SSH config entry removed")
+        except Exception as e:
+            console.print(f"[yellow]⚠[/yellow] Could not remove SSH config entry: {e}")
+
+    # Summary
+    console.print()
+    console.print(f"[bold green]Droplet '{droplet_name}' is now hibernated.[/bold green]")
+    if snapshot:
+        size_gb = snapshot.get("size_gigabytes", 0)
+        if size_gb:
+            console.print(f"Snapshot size: {size_gb} GB")
+    console.print(f"Restore anytime with: [cyan]tobcloud wake {droplet_name}[/cyan]")
+
+
 def _destroy_hibernated_snapshot(
     api: DigitalOceanAPI,
     snapshot: dict,
@@ -2937,7 +3014,12 @@ def off(droplet_name: str = typer.Argument(..., autocompletion=complete_droplet_
 
 @app.command()
 @requires_lock("hibernate")
-def hibernate(droplet_name: str = typer.Argument(..., autocompletion=complete_droplet_name)):
+def hibernate(
+    droplet_name: str = typer.Argument(..., autocompletion=complete_droplet_name),
+    continue_: bool = typer.Option(
+        False, "--continue", "-c", help="Continue a timed-out hibernate operation"
+    ),
+):
     """
     Hibernate a droplet (snapshot and destroy to save costs).
 
@@ -2945,6 +3027,10 @@ def hibernate(droplet_name: str = typer.Argument(..., autocompletion=complete_dr
     You can restore it later with 'tobcloud wake <name>'.
 
     Only droplets tagged with owner:<your-username> can be hibernated.
+
+    Use --continue to resume a hibernate operation that timed out while
+    creating the snapshot. This will find the in-progress snapshot action
+    and wait for it to complete, then finish the hibernate process.
     """
     try:
         # Load config and API
@@ -2972,6 +3058,48 @@ def hibernate(droplet_name: str = typer.Argument(..., autocompletion=complete_dr
 
         # Generate snapshot name
         snapshot_name = get_snapshot_name(droplet_name)
+
+        # Handle --continue flag: resume a timed-out hibernate
+        if continue_:
+            snapshot_action = find_snapshot_action(api, droplet_id)
+
+            if not snapshot_action:
+                console.print("[red]Error: No snapshot action found for this droplet[/red]")
+                console.print("[dim]Run hibernate without --continue to start fresh[/dim]")
+                raise typer.Exit(1)
+
+            action_status = snapshot_action.get("status")
+            action_id = snapshot_action.get("id")
+
+            if not action_id:
+                console.print("[red]Error: Snapshot action has no ID[/red]")
+                raise typer.Exit(1)
+
+            if action_status == "errored":
+                console.print("[red]Error: Previous snapshot action failed[/red]")
+                console.print("[dim]Run hibernate without --continue to retry[/dim]")
+                raise typer.Exit(1)
+            elif action_status == "in-progress":
+                console.print(f"[dim]Found in-progress snapshot action (ID: {action_id})[/dim]")
+                try:
+                    with console.status("[cyan]Waiting for snapshot to complete...[/cyan]"):
+                        api.wait_for_action_complete(action_id, timeout=3600)
+                    console.print("[green]✓[/green] Snapshot completed")
+                except DigitalOceanAPIError as e:
+                    console.print(f"[red]Error: Snapshot wait failed: {e}[/red]")
+                    console.print(
+                        "[yellow]⚠[/yellow] Droplet remains powered off. "
+                        "Run [cyan]tobcloud hibernate --continue[/cyan] again to retry."
+                    )
+                    raise typer.Exit(1)
+            elif action_status == "completed":
+                console.print("[green]✓[/green] Snapshot already completed")
+
+            # Complete the hibernate (tag, destroy, cleanup)
+            _complete_hibernate(
+                api, config, droplet_id, droplet_name, snapshot_name, username, size_slug
+            )
+            return  # Exit early, skip normal flow
 
         # Check if snapshot already exists
         user_tag = get_user_tag(username)
@@ -3060,54 +3188,14 @@ def hibernate(droplet_name: str = typer.Argument(..., autocompletion=complete_dr
             console.print(f"[red]Error: Snapshot creation failed: {e}[/red]")
             console.print(
                 "[yellow]⚠[/yellow] Droplet remains powered off but intact. "
-                "You can try again later."
+                f"Run [cyan]tobcloud hibernate --continue {droplet_name}[/cyan] to retry."
             )
             raise typer.Exit(1)
 
-        # Step 3: Tag the snapshot
-        # First, get the snapshot to get its ID
-        snapshot = api.get_snapshot_by_name(snapshot_name)
-        if snapshot:
-            snapshot_id = snapshot.get("id")
-            if snapshot_id:
-                try:
-                    # Create and apply tags
-                    # owner tag
-                    api.create_tag(user_tag)
-                    api.tag_resource(user_tag, str(snapshot_id), "image")
-
-                    # size tag
-                    size_tag = f"size:{size_slug}"
-                    api.create_tag(size_tag)
-                    api.tag_resource(size_tag, str(snapshot_id), "image")
-                except DigitalOceanAPIError as e:
-                    console.print(f"[yellow]⚠[/yellow] Could not tag snapshot (non-critical): {e}")
-
-        # Step 4: Destroy droplet
-        console.print("\n[dim]Destroying droplet...[/dim]")
-        api.delete_droplet(droplet_id)
-        console.print("[green]✓[/green] Droplet destroyed")
-
-        # Step 5: Remove SSH config entry
-        ssh_hostname = get_ssh_hostname(droplet_name)
-        if host_exists(config.ssh.config_path, ssh_hostname):
-            try:
-                remove_ssh_host(config.ssh.config_path, ssh_hostname)
-                console.print("[green]✓[/green] SSH config entry removed")
-            except Exception as e:
-                console.print(f"[yellow]⚠[/yellow] Could not remove SSH config entry: {e}")
-
-        # Summary
-        console.print()
-        console.print(f"[bold green]Droplet '{droplet_name}' is now hibernated.[/bold green]")
-
-        # Show snapshot size if available
-        if snapshot:
-            size_gb = snapshot.get("size_gigabytes", 0)
-            if size_gb:
-                console.print(f"Snapshot size: {size_gb} GB")
-
-        console.print(f"Restore anytime with: [cyan]tobcloud wake {droplet_name}[/cyan]")
+        # Complete hibernate: tag snapshot, destroy droplet, remove SSH config
+        _complete_hibernate(
+            api, config, droplet_id, droplet_name, snapshot_name, username, size_slug
+        )
 
     except DigitalOceanAPIError as e:
         console.print(f"[red]Error: {e}[/red]")

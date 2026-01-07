@@ -574,6 +574,22 @@ class DigitalOceanAPI:
         response = self._request("GET", f"/actions/{action_id}")
         return response.get("action", {})
 
+    def list_droplet_actions(self, droplet_id: int) -> list[dict[str, Any]]:
+        """
+        List all actions for a droplet.
+
+        Args:
+            droplet_id: Droplet ID
+
+        Returns:
+            List of action objects (most recent first)
+
+        Raises:
+            ValueError: If droplet_id is not positive
+        """
+        self._validate_positive_int(droplet_id, "droplet_id")
+        return self._get_paginated(f"/droplets/{droplet_id}/actions", "actions")
+
     def wait_for_action_complete(
         self,
         action_id: int,
