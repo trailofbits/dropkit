@@ -3049,7 +3049,7 @@ def hibernate(droplet_name: str = typer.Argument(..., autocompletion=complete_dr
             with console.status(
                 "[cyan]Creating snapshot (this may take several minutes)...[/cyan]"
             ):
-                api.wait_for_action_complete(action_id, timeout=1800)  # 30 minutes max
+                api.wait_for_action_complete(action_id, timeout=3600)  # 60 minutes max
 
             elapsed = time.time() - start_time
             minutes = int(elapsed // 60)
