@@ -129,6 +129,50 @@ def complete_project_name(incomplete: str) -> list[str]:
         return []
 
 
+def complete_snapshot_name(incomplete: str) -> list[str]:
+    """
+    Autocompletion function for hibernated snapshot names.
+
+    Fetches tobcloud snapshots from DigitalOcean for the current user
+    and extracts the droplet name from the snapshot name.
+    This is used by Typer for shell completion (e.g., bash, zsh).
+
+    Args:
+        incomplete: Partial text entered by the user
+
+    Returns:
+        List of matching droplet names (without tobcloud- prefix)
+    """
+    try:
+        if not Config.exists():
+            return []
+
+        config_manager = Config()
+        config_manager.load()
+        config = config_manager.config
+        api = DigitalOceanAPI(config.digitalocean.token)
+
+        username = api.get_username()
+        user_tag = get_user_tag(username)
+        snapshots = get_user_hibernated_snapshots(api, user_tag)
+
+        # Extract droplet names from snapshots
+        names = []
+        for snapshot in snapshots:
+            droplet_name = get_droplet_name_from_snapshot(snapshot.get("name", ""))
+            if droplet_name:
+                names.append(droplet_name)
+
+        # Filter by incomplete text (case-insensitive)
+        if incomplete:
+            names = [n for n in names if n.lower().startswith(incomplete.lower())]
+
+        return names
+    except Exception:
+        # Silently fail on errors - completion should never break the CLI
+        return []
+
+
 def load_config_and_api() -> tuple[Config, DigitalOceanAPI]:
     """
     Load configuration and create API client.
@@ -199,6 +243,27 @@ def get_droplet_name_from_snapshot(snapshot_name: str) -> str | None:
     if snapshot_name.startswith(prefix):
         return snapshot_name[len(prefix) :]
     return None
+
+
+def get_user_hibernated_snapshots(api: DigitalOceanAPI, user_tag: str) -> list[dict[str, Any]]:
+    """
+    Get hibernated tobcloud snapshots owned by the user.
+
+    Note: DO API doesn't support tag_name filter for snapshots, so we filter client-side.
+
+    Args:
+        api: DigitalOcean API client
+        user_tag: User's owner tag (e.g., "owner:username")
+
+    Returns:
+        List of snapshot objects that are tobcloud hibernations owned by this user
+    """
+    snapshots = api.list_snapshots()
+    return [
+        s
+        for s in snapshots
+        if s.get("name", "").startswith("tobcloud-") and user_tag in s.get("tags", [])
+    ]
 
 
 def find_snapshot_action(api: DigitalOceanAPI, droplet_id: int) -> dict[str, Any] | None:
@@ -1866,15 +1931,7 @@ def list_droplets():
             console.print(table)
 
         # List hibernated snapshots
-        # Note: DO API doesn't support tag_name filter for snapshots, so we filter client-side
-        snapshots = api.list_snapshots()
-
-        # Filter to only tobcloud-* snapshots owned by this user
-        hibernated = [
-            s
-            for s in snapshots
-            if s.get("name", "").startswith("tobcloud-") and tag_name in s.get("tags", [])
-        ]
+        hibernated = get_user_hibernated_snapshots(api, tag_name)
 
         if hibernated:
             if droplets:
@@ -3204,7 +3261,11 @@ def hibernate(
 
 @app.command()
 @requires_lock("wake")
-def wake(droplet_name: str = typer.Argument(..., help="Name of the hibernated droplet to restore")):
+def wake(
+    droplet_name: str = typer.Argument(
+        ..., autocompletion=complete_snapshot_name, help="Name of the hibernated droplet to restore"
+    ),
+):
     """
     Wake a hibernated droplet (restore from snapshot).
 
