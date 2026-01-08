@@ -304,41 +304,43 @@ DigitalOcean uses **custom scopes** to control what actions an API token can per
 
 ### Required Scopes for tobcloud
 
-To use all features of tobcloud, your DigitalOcean API token needs these **21 specific scopes**:
+To use all features of tobcloud, your DigitalOcean API token needs these **23 specific scopes**:
 
-#### Account (Read-Only)
+#### Account (Full Management)
 - `account:read` - View account details (used to fetch your email for username)
 
-#### Actions (Read-Only)
+#### Actions (Full Management)
 - `actions:read` - View action status (monitor resize/power operations)
 
-#### Droplets (Full Management)
-- `droplet:read` - View droplets (list, get info)
+#### Droplets (Create + Read + Update + Delete)
 - `droplet:create` - Create droplets
+- `droplet:read` - View droplets (list, get info)
 - `droplet:update` - Modify droplets (resize, power on/off)
 - `droplet:delete` - Delete droplets
 
-#### Images (Read-Only)
+#### Image (Full Management)
+- `image:create` - Create images
 - `image:read` - View images (for interactive prompts)
+- `image:update` - Modify images
+- `image:delete` - Delete images
 
 #### Projects (Read + Update)
 - `project:read` - View projects (list, get default project)
 - `project:update` - Modify projects (assign droplets to projects)
 
-#### Regions (Read-Only)
+#### Regions (Full Management)
 - `regions:read` - View data center regions (for interactive prompts)
 
-#### Sizes (Read-Only)
+#### Sizes (Full Management)
 - `sizes:read` - View droplet plan sizes (for interactive prompts)
 
 #### Snapshots (Full Management)
 - `snapshot:read` - View snapshots (list, get info for hibernate/wake)
-- `snapshot:create` - Create snapshots (for hibernate command)
 - `snapshot:delete` - Delete snapshots (for wake command cleanup)
 
 #### SSH Keys (Full Management)
-- `ssh_key:read` - View SSH keys (list, check if exists)
 - `ssh_key:create` - Upload SSH keys
+- `ssh_key:read` - View SSH keys (list, check if exists)
 - `ssh_key:update` - Modify SSH keys (update names)
 - `ssh_key:delete` - Delete SSH keys
 
@@ -357,7 +359,7 @@ To use all features of tobcloud, your DigitalOcean API token needs these **21 sp
 2. Click **Generate New Token**
 3. Give it a descriptive name (e.g., "tobcloud-cli")
 4. Select **Custom Scopes**
-5. Check all 19 scopes listed above
+5. Check all 23 scopes listed above
 6. Set expiration period (or no expiration)
 7. Click **Generate Token**
 
