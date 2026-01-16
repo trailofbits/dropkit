@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from tobcloud.ssh_config import add_ssh_host, remove_ssh_host
+from tobcloud.ssh_config import add_ssh_host, get_ssh_host_ip, remove_ssh_host
 
 
 @pytest.fixture
@@ -612,3 +612,117 @@ Host anotherhost
         assert "Host keephost" in content
         assert "Host removehost" not in content
         assert "Host anotherhost" in content
+
+
+class TestGetSSHHostIP:
+    """Tests for get_ssh_host_ip function."""
+
+    def test_valid_host(self, temp_config):
+        """Test getting IP for existing host."""
+        existing = """Host myhost
+    HostName 192.168.1.100
+    User ubuntu
+"""
+        Path(temp_config).write_text(existing)
+
+        result = get_ssh_host_ip(temp_config, "myhost")
+        assert result == "192.168.1.100"
+
+    def test_host_not_found(self, temp_config):
+        """Test getting IP for non-existent host."""
+        existing = """Host otherhost
+    HostName 192.168.1.100
+    User ubuntu
+"""
+        Path(temp_config).write_text(existing)
+
+        result = get_ssh_host_ip(temp_config, "myhost")
+        assert result is None
+
+    def test_missing_hostname_field(self, temp_config):
+        """Test host entry without HostName field."""
+        existing = """Host myhost
+    User ubuntu
+    IdentityFile ~/.ssh/id_rsa
+"""
+        Path(temp_config).write_text(existing)
+
+        result = get_ssh_host_ip(temp_config, "myhost")
+        assert result is None
+
+    def test_non_existent_file(self, temp_config):
+        """Test with non-existent config file."""
+        result = get_ssh_host_ip(temp_config, "myhost")
+        assert result is None
+
+    def test_tailscale_ip(self, temp_config):
+        """Test getting Tailscale IP address."""
+        existing = """Host tobcloud.myhost
+    HostName 100.80.123.45
+    User ubuntu
+    ForwardAgent yes
+"""
+        Path(temp_config).write_text(existing)
+
+        result = get_ssh_host_ip(temp_config, "tobcloud.myhost")
+        assert result == "100.80.123.45"
+
+    def test_multiple_hosts(self, temp_config):
+        """Test getting IP from config with multiple hosts."""
+        existing = """Host firsthost
+    HostName 10.0.0.1
+    User admin
+
+Host targethost
+    HostName 192.168.1.50
+    User ubuntu
+
+Host thirdhost
+    HostName 10.0.0.3
+    User root
+"""
+        Path(temp_config).write_text(existing)
+
+        result = get_ssh_host_ip(temp_config, "targethost")
+        assert result == "192.168.1.50"
+
+    def test_host_with_extra_whitespace(self, temp_config):
+        """Test HostName with extra whitespace."""
+        existing = """Host myhost
+    HostName   192.168.1.100
+    User ubuntu
+"""
+        Path(temp_config).write_text(existing)
+
+        result = get_ssh_host_ip(temp_config, "myhost")
+        assert result == "192.168.1.100"
+
+    def test_multiple_hosts_on_same_line(self, temp_config):
+        """Test host with multiple aliases on same line."""
+        existing = """Host myhost myalias anotherhost
+    HostName 192.168.1.100
+    User ubuntu
+"""
+        Path(temp_config).write_text(existing)
+
+        # Should work for any of the aliases
+        assert get_ssh_host_ip(temp_config, "myhost") == "192.168.1.100"
+        assert get_ssh_host_ip(temp_config, "myalias") == "192.168.1.100"
+        assert get_ssh_host_ip(temp_config, "anotherhost") == "192.168.1.100"
+
+    def test_hostname_vs_host(self, temp_config):
+        """Test that we distinguish between Host directive and HostName option."""
+        existing = """Host realhost
+    HostName 192.168.1.100
+    User ubuntu
+
+Host anotherreal
+    HostName 10.0.0.1
+    User admin
+"""
+        Path(temp_config).write_text(existing)
+
+        # Should not find HostName as a host alias
+        assert get_ssh_host_ip(temp_config, "192.168.1.100") is None
+        # Should find the actual hosts
+        assert get_ssh_host_ip(temp_config, "realhost") == "192.168.1.100"

@@ -17,7 +17,7 @@ from tobcloud.api import DigitalOceanAPI, DigitalOceanAPIError
 from tobcloud.cloudinit import render_cloud_init
 from tobcloud.config import Config, TobcloudConfig
 from tobcloud.lock import requires_lock
-from tobcloud.ssh_config import add_ssh_host, host_exists, remove_ssh_host
+from tobcloud.ssh_config import add_ssh_host, get_ssh_host_ip, host_exists, remove_ssh_host
 from tobcloud.ui import (
     display_images,
     display_projects,
@@ -744,6 +744,64 @@ def run_tailscale_up(ssh_hostname: str, verbose: bool = False) -> str | None:
         return None
 
 
+def run_tailscale_up_reauth(ssh_hostname: str, verbose: bool = False) -> str | None:
+    """
+    Force Tailscale re-authentication on a droplet restored from snapshot.
+
+    When a droplet is restored from a snapshot, Tailscale preserves its old state
+    but the node identity has changed. We need to force re-authentication to get
+    a new auth URL.
+
+    Args:
+        ssh_hostname: SSH hostname to connect to
+        verbose: Show debug output
+
+    Returns:
+        Auth URL if found, None if tailscale up failed
+    """
+    if verbose:
+        console.print("[dim][DEBUG] Running tailscale up --force-reauth on droplet...[/dim]")
+
+    try:
+        # First logout to clear any stale state, then run up with force-reauth
+        # The --force-reauth ensures we always get a new auth URL
+        result = subprocess.run(
+            [
+                "ssh",
+                "-o",
+                "StrictHostKeyChecking=no",
+                "-o",
+                "UserKnownHostsFile=/dev/null",
+                "-o",
+                "ConnectTimeout=10",
+                ssh_hostname,
+                "sudo tailscale logout 2>/dev/null; timeout 5 sudo tailscale up --force-reauth 2>&1 || true",
+            ],
+            capture_output=True,
+            timeout=30,
+        )
+
+        output = result.stdout.decode("utf-8", errors="ignore")
+
+        if verbose:
+            console.print(f"[dim][DEBUG] tailscale up --force-reauth output: {output}[/dim]")
+
+        # Parse auth URL from output
+        for line in output.split("\n"):
+            url_match = re.search(r"https://[^\s]+", line)
+            if url_match:
+                url = url_match.group(0).rstrip(".,;:!?'\")>]}")
+                if "login.tailscale.com" in url or "tailscale.com" in url:
+                    return url
+
+        return None
+
+    except (subprocess.TimeoutExpired, subprocess.SubprocessError) as e:
+        if verbose:
+            console.print(f"[dim][DEBUG] tailscale up --force-reauth failed: {e}[/dim]")
+        return None
+
+
 def is_tailscale_ip(ip: str) -> bool:
     """
     Check if an IP address is in the Tailscale CGNAT range.
@@ -774,6 +832,142 @@ def is_tailscale_ip(ip: str) -> bool:
 
     except (ValueError, AttributeError):
         return False
+
+
+def is_droplet_tailscale_locked(config: TobcloudConfig, droplet_name: str) -> bool:
+    """
+    Check if droplet is under Tailscale lockdown by examining SSH config IP.
+
+    A droplet is considered locked if its SSH config entry points to a
+    Tailscale IP (100.64.0.0/10 range) rather than a public IP.
+
+    Args:
+        config: TobcloudConfig instance with SSH settings
+        droplet_name: Name of the droplet to check
+
+    Returns:
+        True if droplet SSH config points to Tailscale IP, False otherwise
+    """
+    ssh_hostname = get_ssh_hostname(droplet_name)
+    current_ip = get_ssh_host_ip(config.ssh.config_path, ssh_hostname)
+
+    if not current_ip:
+        return False
+
+    return is_tailscale_ip(current_ip)
+
+
+def add_temporary_ssh_rule(ssh_hostname: str, verbose: bool = False) -> bool:
+    """
+    Add temporary UFW rule to allow SSH on public interface (eth0).
+
+    This allows SSH access via public IP even when firewall is locked
+    to Tailscale only. Used before hibernate to ensure droplet can be
+    accessed after wake (before Tailscale re-authentication).
+
+    Args:
+        ssh_hostname: SSH hostname to connect to
+        verbose: Show debug output
+
+    Returns:
+        True on success, False on failure
+    """
+    cmd = [
+        "ssh",
+        "-o",
+        "StrictHostKeyChecking=no",
+        "-o",
+        "ConnectTimeout=10",
+        ssh_hostname,
+        "sudo ufw allow in on eth0 to any port 22",
+    ]
+
+    if verbose:
+        console.print(f"[dim]Running: {' '.join(cmd)}[/dim]")
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+
+        if verbose:
+            if result.stdout:
+                console.print(f"[dim]stdout: {result.stdout}[/dim]")
+            if result.stderr:
+                console.print(f"[dim]stderr: {result.stderr}[/dim]")
+
+        return result.returncode == 0
+    except (subprocess.TimeoutExpired, subprocess.SubprocessError) as e:
+        if verbose:
+            console.print(f"[dim]SSH command failed: {e}[/dim]")
+        return False
+
+
+def prepare_for_hibernate(
+    config: TobcloudConfig,
+    api: DigitalOceanAPI,
+    droplet: dict,
+    droplet_name: str,
+    verbose: bool = False,
+) -> bool:
+    """
+    Prepare droplet for hibernation, handling Tailscale lockdown if present.
+
+    If droplet is under Tailscale lockdown:
+    1. Add temporary UFW rule to allow SSH on eth0
+    2. Update SSH config to use public IP instead of Tailscale IP
+
+    Args:
+        config: TobcloudConfig instance
+        api: DigitalOceanAPI instance
+        droplet: Droplet dict from API
+        droplet_name: Name of the droplet
+        verbose: Show debug output
+
+    Returns:
+        True if droplet was under Tailscale lockdown, False otherwise
+    """
+    if not is_droplet_tailscale_locked(config, droplet_name):
+        return False
+
+    console.print("[dim]Detected Tailscale lockdown - preparing for hibernate...[/dim]")
+
+    ssh_hostname = get_ssh_hostname(droplet_name)
+
+    # Add temporary SSH rule via Tailscale connection
+    console.print("[dim]Adding temporary SSH rule for eth0...[/dim]")
+    if add_temporary_ssh_rule(ssh_hostname, verbose):
+        console.print("[green]✓[/green] Temporary SSH rule added")
+    else:
+        console.print("[yellow]⚠[/yellow] Could not add temporary SSH rule (non-critical)")
+
+    # Get public IP from droplet
+    networks = droplet.get("networks", {})
+    v4_networks = networks.get("v4", [])
+    public_ip = None
+
+    for network in v4_networks:
+        if network.get("type") == "public":
+            public_ip = network.get("ip_address")
+            break
+
+    if public_ip:
+        # Update SSH config to use public IP
+        console.print(f"[dim]Updating SSH config to public IP: {public_ip}[/dim]")
+        try:
+            # Get username from API
+            username = api.get_username()
+            add_ssh_host(
+                config_path=config.ssh.config_path,
+                host_name=ssh_hostname,
+                hostname=public_ip,
+                user=username,
+                identity_file=config.ssh.identity_file,
+            )
+            console.print("[green]✓[/green] SSH config updated to public IP")
+        except Exception as e:
+            if verbose:
+                console.print(f"[dim]Could not update SSH config: {e}[/dim]")
+
+    return True
 
 
 def wait_for_tailscale_ip(
@@ -1049,6 +1243,7 @@ def setup_tailscale(
     username: str,
     config: TobcloudConfig,
     verbose: bool = False,
+    force_reauth: bool = False,
 ) -> str | None:
     """
     Set up Tailscale VPN on a droplet after cloud-init completes.
@@ -1065,6 +1260,7 @@ def setup_tailscale(
         username: Username for SSH config
         config: TobcloudConfig instance with tailscale and ssh settings
         verbose: Show debug output
+        force_reauth: Force re-authentication (use for snapshot restores)
 
     Returns:
         Tailscale IP address if setup succeeded, None otherwise
@@ -1072,7 +1268,11 @@ def setup_tailscale(
     console.print("\n[bold]Setting up Tailscale VPN[/bold]")
 
     # Run tailscale up and get auth URL
-    auth_url = run_tailscale_up(ssh_hostname, verbose)
+    # Use force_reauth for droplets restored from snapshots (node identity changed)
+    if force_reauth:
+        auth_url = run_tailscale_up_reauth(ssh_hostname, verbose)
+    else:
+        auth_url = run_tailscale_up(ssh_hostname, verbose)
 
     if not auth_url:
         # No auth URL - could mean already authenticated or an error
@@ -2370,15 +2570,26 @@ def _complete_hibernate(
     snapshot_name: str,
     username: str,
     size_slug: str,
+    tailscale_locked: bool = False,
 ) -> None:
     """
     Complete hibernate after snapshot is done (tag, destroy, cleanup, success message).
 
     This handles steps 8-11 of the hibernate flow:
-    - Tag the snapshot with owner and size
+    - Tag the snapshot with owner, size, and tailscale-lockdown (if applicable)
     - Destroy the droplet
     - Remove SSH config entry
     - Print success message
+
+    Args:
+        api: DigitalOceanAPI instance
+        config: TobcloudConfig instance
+        droplet_id: ID of the droplet to destroy
+        droplet_name: Name of the droplet
+        snapshot_name: Name of the snapshot
+        username: Username for tagging
+        size_slug: Size slug for tagging
+        tailscale_locked: If True, tag snapshot with tailscale-lockdown
     """
     user_tag = get_user_tag(username)
 
@@ -2393,6 +2604,12 @@ def _complete_hibernate(
                 size_tag = f"size:{size_slug}"
                 api.create_tag(size_tag)
                 api.tag_resource(size_tag, str(snapshot_id), "image")
+
+                # Tag with tailscale-lockdown if droplet was under Tailscale lockdown
+                if tailscale_locked:
+                    lockdown_tag = "tailscale-lockdown"
+                    api.create_tag(lockdown_tag)
+                    api.tag_resource(lockdown_tag, str(snapshot_id), "image")
             except DigitalOceanAPIError as e:
                 console.print(f"[yellow]⚠[/yellow] Could not tag snapshot (non-critical): {e}")
 
@@ -3152,9 +3369,21 @@ def hibernate(
             elif action_status == "completed":
                 console.print("[green]✓[/green] Snapshot already completed")
 
+            # Detect Tailscale lockdown before completing
+            tailscale_locked = is_droplet_tailscale_locked(config, droplet_name)
+            if tailscale_locked:
+                console.print("[dim]Detected Tailscale lockdown[/dim]")
+
             # Complete the hibernate (tag, destroy, cleanup)
             _complete_hibernate(
-                api, config, droplet_id, droplet_name, snapshot_name, username, size_slug
+                api,
+                config,
+                droplet_id,
+                droplet_name,
+                snapshot_name,
+                username,
+                size_slug,
+                tailscale_locked=tailscale_locked,
             )
             return  # Exit early, skip normal flow
 
@@ -3201,6 +3430,9 @@ def hibernate(
             raise typer.Exit(0)
 
         console.print()
+
+        # Step 0: Prepare for hibernate (handle Tailscale lockdown if present)
+        tailscale_locked = prepare_for_hibernate(config, api, droplet, droplet_name)
 
         # Step 1: Power off if not already off
         if status != "off":
@@ -3251,7 +3483,14 @@ def hibernate(
 
         # Complete hibernate: tag snapshot, destroy droplet, remove SSH config
         _complete_hibernate(
-            api, config, droplet_id, droplet_name, snapshot_name, username, size_slug
+            api,
+            config,
+            droplet_id,
+            droplet_name,
+            snapshot_name,
+            username,
+            size_slug,
+            tailscale_locked=tailscale_locked,
         )
 
     except DigitalOceanAPIError as e:
@@ -3265,12 +3504,17 @@ def wake(
     droplet_name: str = typer.Argument(
         ..., autocompletion=complete_snapshot_name, help="Name of the hibernated droplet to restore"
     ),
+    no_tailscale: bool = typer.Option(False, "--no-tailscale", help="Skip Tailscale VPN re-setup"),
 ):
     """
     Wake a hibernated droplet (restore from snapshot).
 
     This will create a new droplet from the hibernated snapshot.
     After successful restoration, you'll be prompted to delete the snapshot.
+
+    If the original droplet had Tailscale lockdown enabled, this command will
+    re-setup Tailscale after the droplet becomes active. Use --no-tailscale to
+    skip this and keep public SSH access.
 
     Use 'tobcloud destroy <name>' to delete a hibernated snapshot without restoring.
     """
@@ -3316,13 +3560,15 @@ def wake(
         regions = snapshot.get("regions", [])
         original_region = regions[0] if regions else None
 
-        # Get original size from tag
+        # Get original size and check for tailscale-lockdown tag
         tags = snapshot.get("tags", [])
         original_size = None
+        was_tailscale_locked = False
         for tag in tags:
             if tag.startswith("size:"):
                 original_size = tag[5:]  # Remove "size:" prefix
-                break
+            elif tag == "tailscale-lockdown":
+                was_tailscale_locked = True
 
         if not original_region:
             console.print("[red]Error: Could not determine original region from snapshot[/red]")
@@ -3401,6 +3647,42 @@ def wake(
                 console.print("[green]✓[/green] SSH config updated")
             except Exception as e:
                 console.print(f"[yellow]⚠[/yellow] Could not update SSH config: {e}")
+
+        # Handle Tailscale re-setup if the original droplet had Tailscale lockdown
+        if was_tailscale_locked and ip_address:
+            ssh_hostname = get_ssh_hostname(droplet_name)
+            if no_tailscale:
+                console.print()
+                console.print("[yellow]⚠[/yellow] Original droplet had Tailscale lockdown enabled.")
+                console.print(
+                    "[dim]Skipping Tailscale setup (--no-tailscale). "
+                    "Public SSH access available.[/dim]"
+                )
+                console.print(
+                    f"[dim]Enable Tailscale later with: "
+                    f"[cyan]tobcloud enable-tailscale {droplet_name}[/cyan][/dim]"
+                )
+            else:
+                console.print()
+                console.print(
+                    "[dim]Original droplet had Tailscale lockdown - re-setting up Tailscale...[/dim]"
+                )
+                # Wait a bit for droplet to be fully ready for SSH
+                console.print("[dim]Waiting for droplet to be ready for SSH...[/dim]")
+                time.sleep(10)
+
+                # Re-setup Tailscale (force_reauth needed for snapshot restores)
+                tailscale_ip = setup_tailscale(ssh_hostname, username, config, force_reauth=True)
+
+                if not tailscale_ip:
+                    console.print(
+                        "[yellow]⚠[/yellow] Tailscale setup incomplete. "
+                        "Public SSH access remains available."
+                    )
+                    console.print(
+                        f"[dim]Complete setup later with: "
+                        f"[cyan]tobcloud enable-tailscale {droplet_name}[/cyan][/dim]"
+                    )
 
         # Prompt to delete snapshot
         console.print()

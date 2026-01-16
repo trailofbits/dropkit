@@ -121,15 +121,16 @@ uv run pytest tests/test_ssh_config.py::TestAddSSHHost::test_empty_file
 uv run pytest -k "validate_ssh_public_key"
 ```
 
-**Test Coverage (134 tests total):**
-- `tests/test_api.py` - 11 tests for DigitalOcean API client
+**Test Coverage (243 tests total):**
+- `tests/test_api.py` - 15 tests for DigitalOcean API client
   - Email sanitization for username generation
   - Special character handling, number prefixes, empty email fallback
   - Positive integer validation for IDs
   - Droplet URN generation
-- `tests/test_ssh_config.py` - 28 comprehensive tests for SSH config management
+- `tests/test_ssh_config.py` - 37 comprehensive tests for SSH config management
   - Tests for `add_ssh_host`: edge cases, similar names, updates, backup creation
   - Tests for `remove_ssh_host`: removal, edge cases, backup creation
+  - Tests for `get_ssh_host_ip`: valid/missing hosts, Tailscale IPs, multiple hosts
   - All tests verify backup functionality and permission preservation
 - `tests/test_config.py` - 48 comprehensive tests for Pydantic configuration validation
   - Tests for each Pydantic model: DigitalOceanConfig, DefaultsConfig, CloudInitConfig, SSHConfig, TobcloudConfig
@@ -137,10 +138,13 @@ uv run pytest -k "validate_ssh_public_key"
   - **SSH key validation tests**: Valid keys (RSA, ED25519, ECDSA), private key rejection, empty files, invalid content
   - **Username property tests**: Configured username, fallback to system username, before config loaded
   - Tests empty fields, missing fields, extra fields, type validation, nested validation
-- `tests/test_main_helpers.py` - 19 tests for main module helper functions
+- `tests/test_main_helpers.py` - 33 tests for main module helper functions
   - Tests for `get_snapshot_name()`: simple names, hyphens, numbers
   - Tests for `get_droplet_name_from_snapshot()`: valid/invalid snapshot names
   - Tests for `get_ssh_hostname()`, `get_user_tag()`, `build_droplet_tags()`
+  - Tests for `is_droplet_tailscale_locked()`: Tailscale vs public IPs
+  - Tests for `add_temporary_ssh_rule()`: success, failure, timeout
+  - Tests for `prepare_for_hibernate()`: Tailscale lockdown detection and handling
 
 ### Manual Testing Commands
 
@@ -317,9 +321,14 @@ username = Config.sanitize_email_for_username("john.doe@trailofbits.com")
    - `check_tailscale_installed()` - Checks if Tailscale is installed on a droplet
    - `install_tailscale_on_droplet()` - Installs Tailscale on droplet via SSH
    - `run_tailscale_up()` - Runs `tailscale up` on droplet, extracts auth URL
+   - `run_tailscale_up_reauth()` - Forces Tailscale re-auth (for snapshot restores)
    - `wait_for_tailscale_ip()` - Polls for Tailscale IP after authentication
    - `lock_down_to_tailscale()` - Resets UFW to only allow tailscale0 traffic
    - `verify_tailscale_ssh()` - Verifies SSH access works via Tailscale IP
+   - `is_droplet_tailscale_locked()` - Checks if droplet SSH config points to Tailscale IP
+   - `add_temporary_ssh_rule()` - Adds temp UFW rule for SSH on eth0 (for hibernate)
+   - `prepare_for_hibernate()` - Handles Tailscale lockdown preparation before hibernate
+   - `get_ssh_host_ip()` (in ssh_config.py) - Gets IP address from SSH config for a host
 
    **Benefits**: Single source of truth, easier maintenance, reduced code duplication
 
@@ -568,11 +577,16 @@ tags = config_manager.config.defaults.tags         # List[str]
 - [x] `tobcloud hibernate <droplet-name>` - Hibernate droplet (cost-saving)
   - Only allows hibernating droplets tagged with `owner:<username>`
   - **Workflow**:
-    1. Power off droplet (if not already off)
-    2. Create snapshot named `tobcloud-<droplet-name>`
-    3. Tag snapshot with `owner:<username>` and `size:<size-slug>`
-    4. Destroy droplet
-    5. Remove SSH config entry
+    1. Detect Tailscale lockdown (if SSH config points to Tailscale IP)
+    2. If Tailscale locked: add temp SSH rule for eth0, update SSH config to public IP
+    3. Power off droplet (if not already off)
+    4. Create snapshot named `tobcloud-<droplet-name>`
+    5. Tag snapshot with `owner:<username>`, `size:<size-slug>`, and optionally `tailscale-lockdown`
+    6. Destroy droplet
+    7. Remove SSH config entry
+  - **Tailscale lockdown handling**: Automatically detected and handled
+    - Adds temporary UFW rule to allow SSH on eth0 before snapshot
+    - Tags snapshot with `tailscale-lockdown` so wake knows to re-setup Tailscale
   - **Existing snapshot handling**: Prompts to overwrite if snapshot already exists
   - **Error recovery**: If snapshot fails, droplet remains powered off but intact
   - **--continue flag**: Resume a timed-out hibernate operation
@@ -586,9 +600,16 @@ tags = config_manager.config.defaults.tags         # List[str]
   - Checks no droplet with same name exists (error if yes)
   - Finds hibernated snapshot `tobcloud-<name>` by owner tag
   - Reads region from snapshot metadata, size from `size:*` tag
+  - Checks for `tailscale-lockdown` tag on snapshot
   - Creates new droplet from snapshot image
   - Waits for droplet to become active
-  - Adds SSH config entry
+  - Adds SSH config entry (with public IP)
+  - **Tailscale re-setup** (if `tailscale-lockdown` tag present):
+    - Automatically runs `tailscale up` and displays auth URL
+    - Updates SSH config with Tailscale IP after authentication
+    - Locks down firewall to Tailscale only
+  - **Options**:
+    - `--no-tailscale` - Skip Tailscale re-setup (keep public SSH access)
   - **Prompts to delete snapshot** (default: yes) to save storage costs
   - Shows connection instructions on completion
 
