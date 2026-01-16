@@ -19,8 +19,8 @@
     "source=tobcloud-zsh-history,target=/home/vscode/.zsh_history_data,type=volume",
     "source=tobcloud-claude,target=/home/vscode/.claude_data,type=volume",
     "source=tobcloud-gh,target=/home/vscode/.gh_data,type=volume",
-    "source=tobcloud-config,target=/home/vscode/.config/tobcloud,type=volume"
-    // "source=${localEnv:HOME}/.ssh,target=/home/vscode/.ssh,type=bind"
+    "source=tobcloud-config,target=/home/vscode/.config/tobcloud,type=volume",
+    "source=tobcloud-ssh,target=/home/vscode/.ssh,type=volume"
   ],
   "customizations": {
     "vscode": {
