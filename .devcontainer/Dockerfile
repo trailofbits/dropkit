@@ -3,10 +3,6 @@ FROM mcr.microsoft.com/devcontainers/base:debian
 # Install uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
-# Create Claude Code managed settings with allowed plugin marketplaces
-RUN mkdir -p /etc/claude-code && \
-    echo '{"extraKnownMarketplaces": [{"source": "github", "repo": "trailofbits/skills"}, {"source": "github", "repo": "anthropics/skills"}, {"source": "github", "repo": "obra/superpowers"}]}' > /etc/claude-code/managed-settings.json
-
 # Switch to non-root user
 USER vscode
 WORKDIR /home/vscode
@@ -15,7 +11,10 @@ WORKDIR /home/vscode
 ENV PATH="/home/vscode/.local/bin:$PATH"
 
 # Install Claude Code (installs to ~/.local/bin/claude)
-RUN curl -fsSL https://claude.ai/install.sh | bash
+RUN curl -fsSL https://claude.ai/install.sh | bash && \
+    claude plugin marketplace add trailofbits/skills && \
+    claude plugin marketplace add anthropics/skills && \
+    claude plugin marketplace add obra/superpowers
 
 # Set environment variables
 ENV DEVCONTAINER=true
