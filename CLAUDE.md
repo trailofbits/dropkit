@@ -321,7 +321,7 @@ username = Config.sanitize_email_for_username("john.doe@trailofbits.com")
    - `check_tailscale_installed()` - Checks if Tailscale is installed on a droplet
    - `install_tailscale_on_droplet()` - Installs Tailscale on droplet via SSH
    - `run_tailscale_up()` - Runs `tailscale up` on droplet, extracts auth URL
-   - `run_tailscale_up_reauth()` - Forces Tailscale re-auth (for snapshot restores)
+   - `tailscale_logout()` - Logs out from Tailscale before destroy/hibernate (cleans up admin console)
    - `wait_for_tailscale_ip()` - Polls for Tailscale IP after authentication
    - `lock_down_to_tailscale()` - Resets UFW to only allow tailscale0 traffic
    - `verify_tailscale_ssh()` - Verifies SSH access works via Tailscale IP
@@ -510,6 +510,7 @@ tags = config_manager.config.defaults.tags         # List[str]
   - Second prompt: "Type the droplet name to confirm deletion" (must match exactly)
   - Shows comprehensive droplet information before deletion
   - Only allows deletion of resources tagged with `owner:<username>`
+  - **Tailscale cleanup**: If droplet is Tailscale-locked, logs out from Tailscale before deletion (removes device from admin console)
   - **Smart fallback**: If no droplet found, checks for hibernated snapshot with same name
   - For hibernated snapshots: Single yes/no confirmation (simpler flow)
   - Deletes resource via DigitalOcean API
@@ -578,14 +579,17 @@ tags = config_manager.config.defaults.tags         # List[str]
   - Only allows hibernating droplets tagged with `owner:<username>`
   - **Workflow**:
     1. Detect Tailscale lockdown (if SSH config points to Tailscale IP)
-    2. If Tailscale locked: add temp SSH rule for eth0, update SSH config to public IP
-    3. Power off droplet (if not already off)
-    4. Create snapshot named `tobcloud-<droplet-name>`
-    5. Tag snapshot with `owner:<username>`, `size:<size-slug>`, and optionally `tailscale-lockdown`
-    6. Destroy droplet
-    7. Remove SSH config entry
+    2. If Tailscale locked: add temp SSH rule for eth0 (must succeed)
+    3. If temp rule succeeded: logout from Tailscale (cleans up admin console)
+    4. Update SSH config to public IP
+    5. Power off droplet (if not already off)
+    6. Create snapshot named `tobcloud-<droplet-name>`
+    7. Tag snapshot with `owner:<username>`, `size:<size-slug>`, and optionally `tailscale-lockdown`
+    8. Destroy droplet
+    9. Remove SSH config entry
   - **Tailscale lockdown handling**: Automatically detected and handled
-    - Adds temporary UFW rule to allow SSH on eth0 before snapshot
+    - Adds temporary UFW rule to allow SSH on eth0 (safety - ensures fallback access)
+    - Logs out from Tailscale to remove device from admin console
     - Tags snapshot with `tailscale-lockdown` so wake knows to re-setup Tailscale
   - **Existing snapshot handling**: Prompts to overwrite if snapshot already exists
   - **Error recovery**: If snapshot fails, droplet remains powered off but intact
