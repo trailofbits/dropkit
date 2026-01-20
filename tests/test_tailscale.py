@@ -14,6 +14,7 @@ from tobcloud.main import (
     lock_down_to_tailscale,
     run_tailscale_up,
     setup_tailscale,
+    tailscale_logout,
     verify_tailscale_ssh,
 )
 
@@ -491,3 +492,45 @@ class TestSetupTailscale:
 
         assert result == "100.64.1.1"
         mock_check_local.assert_not_called()  # Lockdown logic not entered
+
+
+class TestTailscaleLogout:
+    """Tests for tailscale_logout function."""
+
+    @patch("tobcloud.main.subprocess.run")
+    def test_logout_success(self, mock_run):
+        """Test successful Tailscale logout."""
+        mock_run.return_value = MagicMock(returncode=0, stderr=b"")
+        result = tailscale_logout("tobcloud.test")
+        assert result is True
+        # Verify correct SSH command was called
+        mock_run.assert_called_once()
+        call_args = mock_run.call_args[0][0]
+        assert "ssh" in call_args
+        assert "tobcloud.test" in call_args
+        assert "sudo tailscale logout" in call_args
+
+    @patch("tobcloud.main.subprocess.run")
+    def test_logout_command_fails(self, mock_run):
+        """Test when tailscale logout command fails."""
+        mock_run.return_value = MagicMock(returncode=1, stderr=b"logout failed")
+        result = tailscale_logout("tobcloud.test")
+        assert result is False
+
+    @patch("tobcloud.main.subprocess.run")
+    def test_ssh_connection_fails(self, mock_run):
+        """Test when SSH connection fails."""
+        import subprocess
+
+        mock_run.side_effect = subprocess.SubprocessError("Connection refused")
+        result = tailscale_logout("tobcloud.test")
+        assert result is False
+
+    @patch("tobcloud.main.subprocess.run")
+    def test_ssh_timeout(self, mock_run):
+        """Test when SSH connection times out."""
+        import subprocess
+
+        mock_run.side_effect = subprocess.TimeoutExpired("ssh", 30)
+        result = tailscale_logout("tobcloud.test")
+        assert result is False

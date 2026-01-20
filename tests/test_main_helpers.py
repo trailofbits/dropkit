@@ -1,14 +1,20 @@
 """Tests for main module helper functions."""
 
-from unittest.mock import MagicMock
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 from tobcloud.main import (
+    add_temporary_ssh_rule,
     build_droplet_tags,
     find_snapshot_action,
     get_droplet_name_from_snapshot,
     get_snapshot_name,
     get_ssh_hostname,
     get_user_tag,
+    is_droplet_tailscale_locked,
+    prepare_for_hibernate,
 )
 
 
@@ -165,3 +171,190 @@ class TestFindSnapshotAction:
         result = find_snapshot_action(mock_api, 12345)
 
         assert result is None
+
+
+@pytest.fixture
+def temp_ssh_config(tmp_path):
+    """Create a temporary SSH config file."""
+    ssh_dir = tmp_path / ".ssh"
+    ssh_dir.mkdir(mode=0o700)
+    config_path = ssh_dir / "config"
+    return str(config_path)
+
+
+class TestIsDropletTailscaleLocked:
+    """Tests for is_droplet_tailscale_locked function."""
+
+    def test_tailscale_ip_returns_true(self, temp_ssh_config):
+        """Test returns True when SSH config has Tailscale IP."""
+        # Create SSH config with Tailscale IP
+        Path(temp_ssh_config).write_text("""Host tobcloud.myvm
+    HostName 100.80.123.45
+    User ubuntu
+""")
+
+        mock_config = MagicMock()
+        mock_config.ssh.config_path = temp_ssh_config
+
+        result = is_droplet_tailscale_locked(mock_config, "myvm")
+        assert result is True
+
+    def test_public_ip_returns_false(self, temp_ssh_config):
+        """Test returns False when SSH config has public IP."""
+        # Create SSH config with public IP
+        Path(temp_ssh_config).write_text("""Host tobcloud.myvm
+    HostName 192.168.1.100
+    User ubuntu
+""")
+
+        mock_config = MagicMock()
+        mock_config.ssh.config_path = temp_ssh_config
+
+        result = is_droplet_tailscale_locked(mock_config, "myvm")
+        assert result is False
+
+    def test_missing_entry_returns_false(self, temp_ssh_config):
+        """Test returns False when SSH config has no entry for droplet."""
+        # Create SSH config without the target host
+        Path(temp_ssh_config).write_text("""Host tobcloud.othervm
+    HostName 100.80.123.45
+    User ubuntu
+""")
+
+        mock_config = MagicMock()
+        mock_config.ssh.config_path = temp_ssh_config
+
+        result = is_droplet_tailscale_locked(mock_config, "myvm")
+        assert result is False
+
+    def test_nonexistent_config_file_returns_false(self, temp_ssh_config):
+        """Test returns False when SSH config file doesn't exist."""
+        mock_config = MagicMock()
+        mock_config.ssh.config_path = "/nonexistent/path/config"
+
+        result = is_droplet_tailscale_locked(mock_config, "myvm")
+        assert result is False
+
+
+class TestAddTemporarySshRule:
+    """Tests for add_temporary_ssh_rule function."""
+
+    @patch("tobcloud.main.subprocess.run")
+    def test_success(self, mock_run):
+        """Test successful SSH rule addition."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        result = add_temporary_ssh_rule("tobcloud.myvm")
+
+        assert result is True
+        mock_run.assert_called_once()
+        call_args = mock_run.call_args
+        assert "tobcloud.myvm" in call_args[0][0]
+        assert "sudo ufw allow in on eth0 to any port 22" in call_args[0][0]
+
+    @patch("tobcloud.main.subprocess.run")
+    def test_failure(self, mock_run):
+        """Test failed SSH rule addition."""
+        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="error")
+
+        result = add_temporary_ssh_rule("tobcloud.myvm")
+
+        assert result is False
+
+    @patch("tobcloud.main.subprocess.run")
+    def test_timeout(self, mock_run):
+        """Test SSH timeout."""
+        import subprocess
+
+        mock_run.side_effect = subprocess.TimeoutExpired("ssh", 30)
+
+        result = add_temporary_ssh_rule("tobcloud.myvm")
+
+        assert result is False
+
+
+class TestPrepareForHibernate:
+    """Tests for prepare_for_hibernate function."""
+
+    def test_not_tailscale_locked_returns_false(self, temp_ssh_config):
+        """Test returns False when droplet is not Tailscale locked."""
+        # Create SSH config with public IP (not Tailscale locked)
+        Path(temp_ssh_config).write_text("""Host tobcloud.myvm
+    HostName 192.168.1.100
+    User ubuntu
+""")
+
+        mock_config = MagicMock()
+        mock_config.ssh.config_path = temp_ssh_config
+
+        mock_api = MagicMock()
+        mock_droplet = {"networks": {"v4": [{"type": "public", "ip_address": "192.168.1.100"}]}}
+
+        result = prepare_for_hibernate(mock_config, mock_api, mock_droplet, "myvm")
+
+        assert result is False
+
+    @patch("tobcloud.main.tailscale_logout")
+    @patch("tobcloud.main.add_temporary_ssh_rule")
+    @patch("tobcloud.main.add_ssh_host")
+    def test_tailscale_locked_returns_true(
+        self, mock_add_ssh_host, mock_add_temp_rule, mock_logout, temp_ssh_config
+    ):
+        """Test returns True when droplet is Tailscale locked."""
+        # Create SSH config with Tailscale IP
+        Path(temp_ssh_config).write_text("""Host tobcloud.myvm
+    HostName 100.80.123.45
+    User ubuntu
+""")
+
+        mock_config = MagicMock()
+        mock_config.ssh.config_path = temp_ssh_config
+        mock_config.ssh.identity_file = "~/.ssh/id_ed25519"
+
+        mock_api = MagicMock()
+        mock_api.get_username.return_value = "testuser"
+
+        mock_droplet = {"networks": {"v4": [{"type": "public", "ip_address": "203.0.113.50"}]}}
+
+        mock_add_temp_rule.return_value = True
+        mock_logout.return_value = True
+
+        result = prepare_for_hibernate(mock_config, mock_api, mock_droplet, "myvm")
+
+        assert result is True
+        mock_add_temp_rule.assert_called_once()
+        mock_logout.assert_called_once()
+        mock_add_ssh_host.assert_called_once()
+
+    @patch("tobcloud.main.tailscale_logout")
+    @patch("tobcloud.main.add_temporary_ssh_rule")
+    @patch("tobcloud.main.add_ssh_host")
+    def test_temp_rule_failure_skips_logout(
+        self, mock_add_ssh_host, mock_add_temp_rule, mock_logout, temp_ssh_config
+    ):
+        """Test returns True but skips logout if temp rule fails (safety)."""
+        # Create SSH config with Tailscale IP
+        Path(temp_ssh_config).write_text("""Host tobcloud.myvm
+    HostName 100.80.123.45
+    User ubuntu
+""")
+
+        mock_config = MagicMock()
+        mock_config.ssh.config_path = temp_ssh_config
+        mock_config.ssh.identity_file = "~/.ssh/id_ed25519"
+
+        mock_api = MagicMock()
+        mock_api.get_username.return_value = "testuser"
+
+        mock_droplet = {"networks": {"v4": [{"type": "public", "ip_address": "203.0.113.50"}]}}
+
+        mock_add_temp_rule.return_value = False  # Simulating failure
+
+        result = prepare_for_hibernate(mock_config, mock_api, mock_droplet, "myvm")
+
+        # Should still return True because we detected Tailscale lockdown
+        assert result is True
+        # But logout should NOT be called (safety - need public IP fallback first)
+        mock_logout.assert_not_called()
+        # And SSH config should NOT be updated (early return)
+        mock_add_ssh_host.assert_not_called()

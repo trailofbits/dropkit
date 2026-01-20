@@ -104,6 +104,47 @@ def add_ssh_host(
     config_file.chmod(0o600)
 
 
+def get_ssh_host_ip(config_path: str, host_name: str) -> str | None:
+    """
+    Get the HostName (IP address) for an SSH host entry.
+
+    Args:
+        config_path: Path to SSH config file
+        host_name: Host alias to look up
+
+    Returns:
+        IP address/hostname if found, None otherwise
+    """
+    config_file = Path(config_path).expanduser()
+
+    if not config_file.exists():
+        return None
+
+    with open(config_file) as f:
+        lines = f.readlines()
+
+    in_target_host = False
+    for line in lines:
+        stripped = line.strip()
+
+        # Check for Host directive
+        if stripped.startswith("Host "):
+            # Extract host name (handle multiple hosts on same line)
+            host_part = stripped[5:].strip()
+            hosts = host_part.split()
+            in_target_host = host_name in hosts
+        elif in_target_host and stripped.startswith("HostName "):
+            # Found HostName in target host block
+            return stripped[9:].strip()
+        elif in_target_host and stripped and not stripped.startswith((" ", "\t", "#")):
+            # Left the host block (non-indented, non-comment line)
+            # This handles case where there's no HostName
+            if not line.startswith((" ", "\t")):
+                in_target_host = False
+
+    return None
+
+
 def host_exists(config_path: str, host_name: str) -> bool:
     """
     Check if an SSH host entry exists in the SSH config file.
