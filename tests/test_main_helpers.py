@@ -294,10 +294,11 @@ class TestPrepareForHibernate:
 
         assert result is False
 
+    @patch("tobcloud.main.tailscale_logout")
     @patch("tobcloud.main.add_temporary_ssh_rule")
     @patch("tobcloud.main.add_ssh_host")
     def test_tailscale_locked_returns_true(
-        self, mock_add_ssh_host, mock_add_temp_rule, temp_ssh_config
+        self, mock_add_ssh_host, mock_add_temp_rule, mock_logout, temp_ssh_config
     ):
         """Test returns True when droplet is Tailscale locked."""
         # Create SSH config with Tailscale IP
@@ -316,16 +317,22 @@ class TestPrepareForHibernate:
         mock_droplet = {"networks": {"v4": [{"type": "public", "ip_address": "203.0.113.50"}]}}
 
         mock_add_temp_rule.return_value = True
+        mock_logout.return_value = True
 
         result = prepare_for_hibernate(mock_config, mock_api, mock_droplet, "myvm")
 
         assert result is True
         mock_add_temp_rule.assert_called_once()
+        mock_logout.assert_called_once()
         mock_add_ssh_host.assert_called_once()
 
+    @patch("tobcloud.main.tailscale_logout")
     @patch("tobcloud.main.add_temporary_ssh_rule")
-    def test_temp_rule_failure_still_returns_true(self, mock_add_temp_rule, temp_ssh_config):
-        """Test returns True even if temp rule fails (non-critical)."""
+    @patch("tobcloud.main.add_ssh_host")
+    def test_temp_rule_failure_skips_logout(
+        self, mock_add_ssh_host, mock_add_temp_rule, mock_logout, temp_ssh_config
+    ):
+        """Test returns True but skips logout if temp rule fails (safety)."""
         # Create SSH config with Tailscale IP
         Path(temp_ssh_config).write_text("""Host tobcloud.myvm
     HostName 100.80.123.45
@@ -347,3 +354,7 @@ class TestPrepareForHibernate:
 
         # Should still return True because we detected Tailscale lockdown
         assert result is True
+        # But logout should NOT be called (safety - need public IP fallback first)
+        mock_logout.assert_not_called()
+        # And SSH config should NOT be updated (early return)
+        mock_add_ssh_host.assert_not_called()

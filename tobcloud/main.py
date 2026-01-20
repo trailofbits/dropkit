@@ -744,27 +744,24 @@ def run_tailscale_up(ssh_hostname: str, verbose: bool = False) -> str | None:
         return None
 
 
-def run_tailscale_up_reauth(ssh_hostname: str, verbose: bool = False) -> str | None:
+def tailscale_logout(ssh_hostname: str, verbose: bool = False) -> bool:
     """
-    Force Tailscale re-authentication on a droplet restored from snapshot.
+    Logout from Tailscale on a droplet before destroy/hibernate.
 
-    When a droplet is restored from a snapshot, Tailscale preserves its old state
-    but the node identity has changed. We need to force re-authentication to get
-    a new auth URL.
+    This removes the device from the Tailscale admin console, preventing
+    stale entries from accumulating.
 
     Args:
         ssh_hostname: SSH hostname to connect to
         verbose: Show debug output
 
     Returns:
-        Auth URL if found, None if tailscale up failed
+        True if logout succeeded, False if it failed
     """
     if verbose:
-        console.print("[dim][DEBUG] Running tailscale up --force-reauth on droplet...[/dim]")
+        console.print("[dim][DEBUG] Running tailscale logout on droplet...[/dim]")
 
     try:
-        # First logout to clear any stale state, then run up with force-reauth
-        # The --force-reauth ensures we always get a new auth URL
         result = subprocess.run(
             [
                 "ssh",
@@ -775,31 +772,26 @@ def run_tailscale_up_reauth(ssh_hostname: str, verbose: bool = False) -> str | N
                 "-o",
                 "ConnectTimeout=10",
                 ssh_hostname,
-                "sudo tailscale logout 2>/dev/null; timeout 5 sudo tailscale up --force-reauth 2>&1 || true",
+                "sudo tailscale logout",
             ],
             capture_output=True,
             timeout=30,
         )
 
-        output = result.stdout.decode("utf-8", errors="ignore")
-
-        if verbose:
-            console.print(f"[dim][DEBUG] tailscale up --force-reauth output: {output}[/dim]")
-
-        # Parse auth URL from output
-        for line in output.split("\n"):
-            url_match = re.search(r"https://[^\s]+", line)
-            if url_match:
-                url = url_match.group(0).rstrip(".,;:!?'\")>]}")
-                if "login.tailscale.com" in url or "tailscale.com" in url:
-                    return url
-
-        return None
+        if result.returncode == 0:
+            if verbose:
+                console.print("[dim][DEBUG] tailscale logout succeeded[/dim]")
+            return True
+        else:
+            stderr = result.stderr.decode("utf-8", errors="ignore")
+            if verbose:
+                console.print(f"[dim][DEBUG] tailscale logout failed: {stderr}[/dim]")
+            return False
 
     except (subprocess.TimeoutExpired, subprocess.SubprocessError) as e:
         if verbose:
-            console.print(f"[dim][DEBUG] tailscale up --force-reauth failed: {e}[/dim]")
-        return None
+            console.print(f"[dim][DEBUG] tailscale logout failed: {e}[/dim]")
+        return False
 
 
 def is_tailscale_ip(ip: str) -> bool:
@@ -932,12 +924,28 @@ def prepare_for_hibernate(
 
     ssh_hostname = get_ssh_hostname(droplet_name)
 
-    # Add temporary SSH rule via Tailscale connection
+    # Add temporary SSH rule via Tailscale connection (must succeed before logout)
     console.print("[dim]Adding temporary SSH rule for eth0...[/dim]")
-    if add_temporary_ssh_rule(ssh_hostname, verbose):
-        console.print("[green]✓[/green] Temporary SSH rule added")
+    if not add_temporary_ssh_rule(ssh_hostname, verbose):
+        # Temp rule failed - abort logout to keep Tailscale connectivity
+        console.print(
+            "[yellow]⚠[/yellow] Could not add temporary SSH rule - "
+            "skipping Tailscale logout to maintain connectivity"
+        )
+        # Continue without logout - snapshot will preserve Tailscale state
+        return True
+
+    console.print("[green]✓[/green] Temporary SSH rule added")
+
+    # Now safe to logout from Tailscale (we have public IP fallback)
+    console.print("[dim]Logging out from Tailscale...[/dim]")
+    if tailscale_logout(ssh_hostname, verbose):
+        console.print("[green]✓[/green] Logged out from Tailscale")
     else:
-        console.print("[yellow]⚠[/yellow] Could not add temporary SSH rule (non-critical)")
+        console.print(
+            "[yellow]⚠[/yellow] Could not logout from Tailscale "
+            "(device may remain in Tailscale admin console)"
+        )
 
     # Get public IP from droplet
     networks = droplet.get("networks", {})
@@ -1243,7 +1251,6 @@ def setup_tailscale(
     username: str,
     config: TobcloudConfig,
     verbose: bool = False,
-    force_reauth: bool = False,
 ) -> str | None:
     """
     Set up Tailscale VPN on a droplet after cloud-init completes.
@@ -1260,7 +1267,6 @@ def setup_tailscale(
         username: Username for SSH config
         config: TobcloudConfig instance with tailscale and ssh settings
         verbose: Show debug output
-        force_reauth: Force re-authentication (use for snapshot restores)
 
     Returns:
         Tailscale IP address if setup succeeded, None otherwise
@@ -1268,11 +1274,7 @@ def setup_tailscale(
     console.print("\n[bold]Setting up Tailscale VPN[/bold]")
 
     # Run tailscale up and get auth URL
-    # Use force_reauth for droplets restored from snapshots (node identity changed)
-    if force_reauth:
-        auth_url = run_tailscale_up_reauth(ssh_hostname, verbose)
-    else:
-        auth_url = run_tailscale_up(ssh_hostname, verbose)
+    auth_url = run_tailscale_up(ssh_hostname, verbose)
 
     if not auth_url:
         # No auth URL - could mean already authenticated or an error
@@ -2534,6 +2536,19 @@ def destroy(droplet_name: str = typer.Argument(..., autocompletion=complete_drop
             console.print("[dim]Cancelled.[/dim]")
             raise typer.Exit(1)
 
+        # Logout from Tailscale if droplet is Tailscale-locked (best-effort)
+        if is_droplet_tailscale_locked(config, droplet_name):
+            ssh_hostname = get_ssh_hostname(droplet_name)
+            console.print()
+            console.print("[dim]Logging out from Tailscale...[/dim]")
+            if tailscale_logout(ssh_hostname):
+                console.print("[green]✓[/green] Logged out from Tailscale")
+            else:
+                console.print(
+                    "[yellow]⚠[/yellow] Could not logout from Tailscale "
+                    "(device may remain in Tailscale admin console)"
+                )
+
         # Proceed with deletion
         console.print()
         console.print("[dim]Deleting droplet...[/dim]")
@@ -3671,8 +3686,8 @@ def wake(
                 console.print("[dim]Waiting for droplet to be ready for SSH...[/dim]")
                 time.sleep(10)
 
-                # Re-setup Tailscale (force_reauth needed for snapshot restores)
-                tailscale_ip = setup_tailscale(ssh_hostname, username, config, force_reauth=True)
+                # Re-setup Tailscale (clean state from hibernate logout)
+                tailscale_ip = setup_tailscale(ssh_hostname, username, config)
 
                 if not tailscale_ip:
                     console.print(
