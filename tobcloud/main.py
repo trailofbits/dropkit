@@ -3368,7 +3368,7 @@ def hibernate(
                 console.print("[red]Error: Previous snapshot action failed[/red]")
                 console.print("[dim]Run hibernate without --continue to retry[/dim]")
                 raise typer.Exit(1)
-            elif action_status == "in-progress":
+            if action_status == "in-progress":
                 console.print(f"[dim]Found in-progress snapshot action (ID: {action_id})[/dim]")
                 try:
                     with console.status("[cyan]Waiting for snapshot to complete...[/cyan]"):

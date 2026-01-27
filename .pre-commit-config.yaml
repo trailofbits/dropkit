@@ -1,0 +1,25 @@
+# See https://pre-commit.com for more information
+# Run with: prek run (or prek run --all-files)
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format --check
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      - id: ty-check
+        name: ty type check
+        entry: uv run ty check tobcloud/
+        language: system
+        types: [python]
+        pass_filenames: false

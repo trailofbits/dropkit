@@ -295,7 +295,7 @@ class Config:
     def create_default_config(
         self,
         token: str,
-        username: str,
+        username: str,  # noqa: ARG002 - kept for API compatibility, username derived from DO API
         region: str = "nyc3",
         size: str = "s-2vcpu-4gb",
         image: str = "ubuntu-25-04-x64",
