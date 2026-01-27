@@ -130,7 +130,7 @@ class TestConcurrentLock:
         results_file = tmp_path / "results.txt"
 
         # Script that holds lock and logs events
-        holder_script = f'''
+        holder_script = f"""
 import sys
 import fcntl
 import os
@@ -147,9 +147,9 @@ with open(results_path, "a") as f:
     f.write("first_released\\n")
 fcntl.flock(fd, fcntl.LOCK_UN)
 os.close(fd)
-'''
+"""
 
-        waiter_script = f'''
+        waiter_script = f"""
 import sys
 import fcntl
 import os
@@ -162,7 +162,7 @@ with open(results_path, "a") as f:
     f.write("second_acquired\\n")
 fcntl.flock(fd, fcntl.LOCK_UN)
 os.close(fd)
-'''
+"""
 
         # Start holder first
         p1 = subprocess.Popen([sys.executable, "-c", holder_script])
@@ -188,7 +188,7 @@ os.close(fd)
         ready_file = tmp_path / "ready"
 
         # Script that holds lock indefinitely until killed
-        holder_script = f'''
+        holder_script = f"""
 import fcntl
 import os
 import time
@@ -199,7 +199,7 @@ fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
 fcntl.flock(fd, fcntl.LOCK_EX)
 Path(ready_path).touch()  # Signal we have the lock
 time.sleep(30)  # Hold lock
-'''
+"""
 
         p = subprocess.Popen([sys.executable, "-c", holder_script])
 
@@ -260,7 +260,6 @@ class TestRequiresLockDecorator:
         @requires_lock("test")
         def my_function_with_doc():
             """My docstring."""
-            pass
 
         assert my_function_with_doc.__name__ == "my_function_with_doc"
         assert my_function_with_doc.__doc__ == "My docstring."
@@ -283,7 +282,7 @@ class TestRequiresLockDecorator:
         ready_file = tmp_path / "ready"
 
         # Script that holds lock
-        holder_script = f'''
+        holder_script = f"""
 import fcntl
 import os
 import time
@@ -294,7 +293,7 @@ fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
 fcntl.flock(fd, fcntl.LOCK_EX)
 Path(ready_path).touch()
 time.sleep(30)
-'''
+"""
 
         p = subprocess.Popen([sys.executable, "-c", holder_script])
 

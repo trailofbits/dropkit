@@ -27,8 +27,6 @@ console = Console()
 class LockError(Exception):
     """Raised when lock acquisition fails."""
 
-    pass
-
 
 class LockInfo:
     """Information about the current lock holder."""

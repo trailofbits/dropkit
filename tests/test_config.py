@@ -312,7 +312,7 @@ class TestConfigManager:
     def test_create_config_without_ssh_keys_raises_error(self, monkeypatch):
         """Test that creating config without SSH keys raises error."""
         # Mock detect_ssh_keys to return empty list
-        monkeypatch.setattr(Config, "detect_ssh_keys", staticmethod(lambda: []))
+        monkeypatch.setattr(Config, "detect_ssh_keys", staticmethod(list))
 
         config = Config()
         with pytest.raises(ValueError) as exc_info:

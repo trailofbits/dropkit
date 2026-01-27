@@ -11,8 +11,8 @@ echo "Running ruff check..."
 uv run ruff check .
 
 echo ""
-echo "Running mypy..."
-uv run mypy tobcloud
+echo "Running ty..."
+uv run ty check tobcloud/
 
 echo ""
 echo "✓ All linting passed!"
