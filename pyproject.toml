@@ -20,6 +20,7 @@ tobcloud = "tobcloud.main:app"
 
 [tool.uv]
 package = true
+default-groups = ["dev"]
 
 [build-system]
 requires = ["hatchling"]

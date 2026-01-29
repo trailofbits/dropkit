@@ -1,25 +1,41 @@
-# See https://pre-commit.com for more information
+# Pre-commit configuration
 # Run with: prek run (or prek run --all-files)
+
+default_language_version:
+  python: python3.11
+
 repos:
+  # Ruff - official pre-commit hooks (faster than local)
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.14
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  # prek builtin hooks - fast, no external deps
+  - repo: builtin
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        exclude: ^tobcloud/templates/  # Jinja2 templates aren't valid YAML
+      - id: check-toml
+      - id: check-merge-conflict
+
+  # ty type checking (no official pre-commit hook, use local)
   - repo: local
     hooks:
-      - id: ruff-format
-        name: ruff format
-        entry: uv run ruff format --check
-        language: system
-        types: [python]
-        pass_filenames: false
-
-      - id: ruff-check
-        name: ruff check
-        entry: uv run ruff check
-        language: system
-        types: [python]
-        pass_filenames: false
-
       - id: ty-check
         name: ty type check
         entry: uv run ty check tobcloud/
         language: system
         types: [python]
         pass_filenames: false
+
+  # Shell script linting (checks lint.sh)
+  - repo: https://github.com/koalaman/shellcheck-precommit
+    rev: v0.10.0
+    hooks:
+      - id: shellcheck
+        args: [--severity=error]
