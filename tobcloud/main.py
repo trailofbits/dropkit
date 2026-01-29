@@ -17,7 +17,13 @@ from tobcloud.api import DigitalOceanAPI, DigitalOceanAPIError
 from tobcloud.cloudinit import render_cloud_init
 from tobcloud.config import Config, TobcloudConfig
 from tobcloud.lock import requires_lock
-from tobcloud.ssh_config import add_ssh_host, get_ssh_host_ip, host_exists, remove_ssh_host
+from tobcloud.ssh_config import (
+    add_ssh_host,
+    get_ssh_host_ip,
+    host_exists,
+    remove_known_hosts_entry,
+    remove_ssh_host,
+)
 from tobcloud.ui import (
     display_images,
     display_projects,
@@ -2635,12 +2641,31 @@ def _complete_hibernate(
 
     # Remove SSH config entry
     ssh_hostname = get_ssh_hostname(droplet_name)
+    ssh_ip = get_ssh_host_ip(config.ssh.config_path, ssh_hostname)
     if host_exists(config.ssh.config_path, ssh_hostname):
         try:
             remove_ssh_host(config.ssh.config_path, ssh_hostname)
             console.print("[green]✓[/green] SSH config entry removed")
         except Exception as e:
             console.print(f"[yellow]⚠[/yellow] Could not remove SSH config entry: {e}")
+
+    # Prompt for known_hosts cleanup
+    if Confirm.ask("Remove SSH fingerprint from known_hosts?", default=True):
+        known_hosts_path = str(Path(config.ssh.config_path).parent / "known_hosts")
+        hostnames_to_remove = [ssh_hostname]
+        if ssh_ip:
+            hostnames_to_remove.append(ssh_ip)
+        try:
+            removed = remove_known_hosts_entry(known_hosts_path, hostnames_to_remove)
+            if removed:
+                console.print(
+                    f"[green]✓[/green] Removed {removed} known_hosts "
+                    f"{'entry' if removed == 1 else 'entries'}"
+                )
+            else:
+                console.print("[dim]No matching entries in known_hosts[/dim]")
+        except Exception as e:
+            console.print(f"[yellow]⚠[/yellow] Could not remove known_hosts entry: {e}")
 
     # Summary
     console.print()
