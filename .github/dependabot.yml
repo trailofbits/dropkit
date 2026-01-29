@@ -4,6 +4,8 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 7  # Supply chain protection: wait for community vetting
     groups:
       python-dependencies:
         patterns:
