@@ -342,10 +342,7 @@ def ensure_ssh_config(
 
 
 def cleanup_ssh_entries(
-    config: TobcloudConfig,
-    droplet_name: str,
-    *,
-    prompt_known_hosts: bool = True,
+    config: TobcloudConfig, droplet_name: str, prompt_known_hosts: bool = True
 ) -> None:
     """
     Remove SSH config entry and optionally clean up known_hosts for a droplet.
@@ -359,6 +356,7 @@ def cleanup_ssh_entries(
 
     # Get IP BEFORE removing SSH config (needed for known_hosts cleanup)
     ssh_ip = get_ssh_host_ip(config.ssh.config_path, ssh_hostname)
+    console.print(f"[dim]Found IP: {ssh_ip}[/dim]")
 
     # Remove SSH config entry
     if host_exists(config.ssh.config_path, ssh_hostname):
@@ -382,6 +380,7 @@ def cleanup_ssh_entries(
         hostnames_to_remove = [ssh_hostname]
         if ssh_ip:
             hostnames_to_remove.append(ssh_ip)
+        console.print(f"[dim]Hostnames to find: {hostnames_to_remove}[/dim]")
         try:
             removed = remove_known_hosts_entry(known_hosts_path, hostnames_to_remove)
             if removed:
