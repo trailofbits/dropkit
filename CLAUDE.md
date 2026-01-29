@@ -26,7 +26,6 @@ tobcloud/
 ├── pyproject.toml              # Dependencies and metadata
 ├── CLAUDE.md                   # This file
 ├── README.md                   # User documentation
-├── lint.sh                     # Linting script (ruff + mypy)
 ├── tobcloud/
 │   ├── main.py                 # Typer CLI entry point
 │   ├── config.py               # Config with SSH key validation
@@ -49,7 +48,7 @@ tobcloud/
 - **API**: Direct REST calls (requests library, no SDK)
 - **Config**: YAML + Pydantic 2.x validation
 - **Templating**: Jinja2 for cloud-init
-- **Code Quality**: Ruff (linter + formatter), Mypy (types)
+- **Code Quality**: Ruff (linter + formatter), ty (types)
 
 ## Key Conventions
 

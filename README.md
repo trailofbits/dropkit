@@ -278,10 +278,10 @@ uv run pytest -k "test_*"  # Run specific tests
 ### Code Quality
 
 ```bash
-./lint.sh              # Run all linting (ruff + mypy)
+prek run              # Run all checks (ruff, ty, shellcheck)
 uv run ruff format .   # Format code
 uv run ruff check .    # Lint code
-uv run mypy tobcloud   # Type check
+uv run ty check tobcloud/   # Type check
 ```
 
 ## Technology Stack
@@ -292,7 +292,7 @@ uv run mypy tobcloud   # Type check
 - **Configuration**: [Pydantic](https://docs.pydantic.dev/) - Data validation
 - **Templating**: [Jinja2](https://jinja.palletsprojects.com/) - Cloud-init templates
 - **Package Manager**: [uv](https://github.com/astral-sh/uv) - Fast Python package manager
-- **Code Quality**: Ruff (linter/formatter) + Mypy (type checker)
+- **Code Quality**: Ruff (linter/formatter) + ty (type checker)
 
 ## Appendix: API Token Permissions
 
