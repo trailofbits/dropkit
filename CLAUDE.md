@@ -6,16 +6,16 @@ Pre-configured cloud-init, Tailscale VPN (enabled by default), and SSH config ma
 ## Critical Rules ⚠️
 
 - **Never use `pip`** — always use `uv` for all Python operations
-- **Always run `./lint.sh`** before committing
+- **Always run `prek run`** before committing (or `prek install` to auto-run on commit)
 - **Keep README.md in sync** when adding commands or features
 
 ## Quick Commands
 
 ```bash
 uv sync                      # Install dependencies
-./lint.sh                    # Run ruff + mypy (required before commit)
+prek install                 # Set up pre-commit hooks (one-time)
+prek run                     # Run all checks (ruff, ty, shellcheck, etc.)
 uv run pytest                # Run tests
-uv run pytest -k "pattern"   # Run specific tests
 uv run tobcloud --help       # CLI help
 ```
 
@@ -136,10 +136,10 @@ uv run <command>             # Run in venv
 
 ### Linting
 ```bash
-./lint.sh                    # Run all (required before commit)
-uv run ruff format .         # Format only
-uv run ruff check --fix .    # Lint + autofix
-uv run mypy tobcloud         # Type check only
+prek run                     # Run all checks (required before commit)
+prek run --all-files         # Check all files, not just staged
+uv run ruff check --fix .    # Lint + autofix only
+uv run ty check tobcloud/    # Type check only
 ```
 
 **Ruff config**: Python 3.11+, 100-char lines, modern syntax (`str | None`, `list[str]`).
