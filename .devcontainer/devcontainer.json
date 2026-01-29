@@ -48,7 +48,8 @@
     }
   },
   "onCreateCommand": "uv sync",
-  "postCreateCommand": "sudo chown -R vscode:vscode /home/vscode/.config/tobcloud /home/vscode/.claude_data /home/vscode/.gh_data /home/vscode/.zsh_history_data",
+  "updateContentCommand": "uv sync",
+  "postCreateCommand": "sudo chown -R vscode:vscode /home/vscode/.config/tobcloud /home/vscode/.claude_data /home/vscode/.gh_data /home/vscode/.zsh_history_data /home/vscode/.ssh",
   "containerEnv": {
     "UV_LINK_MODE": "copy",
     "CLAUDE_CONFIG_DIR": "/home/vscode/.claude_data",
