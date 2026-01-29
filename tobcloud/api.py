@@ -1,4 +1,58 @@
-"""DigitalOcean API client using raw REST API calls."""
+"""DigitalOcean API client using raw REST API calls.
+
+API Reference
+=============
+
+Base URL: https://api.digitalocean.com/v2
+Auth: Authorization: Bearer <token>
+
+Key Endpoints
+-------------
+
+Account & SSH Keys:
+    GET  /account                       Account info (includes email for username)
+    GET  /account/keys                  List SSH keys (paginated)
+    GET  /account/keys/{fingerprint}    Get SSH key by fingerprint
+    POST /account/keys                  Add new SSH key
+    PUT  /account/keys/{id}             Update SSH key name
+    DELETE /account/keys/{id}           Delete SSH key
+
+Droplets:
+    POST   /droplets                    Create droplet
+    GET    /droplets                    List droplets
+    GET    /droplets?tag_name=X         Filter by tag
+    GET    /droplets/{id}               Get droplet info
+    DELETE /droplets/{id}               Delete droplet
+    POST   /droplets/{id}/actions       Perform action (resize, power_on, power_off, snapshot)
+
+Metadata:
+    GET /regions                        List regions (paginated)
+    GET /sizes                          List droplet sizes (paginated)
+    GET /images                         List images (paginated)
+
+Actions:
+    GET /actions/{id}                   Check action status
+
+Projects:
+    GET  /projects                      List projects (paginated)
+    GET  /projects/{project_id}         Get project by UUID
+    GET  /projects/default              Get default project
+    POST /projects/{project_id}/resources   Assign resources (body: {"resources": ["do:droplet:123"]})
+
+Snapshots:
+    GET    /snapshots                   List snapshots (filter: resource_type=droplet)
+    GET    /snapshots/{id}              Get snapshot
+    DELETE /snapshots/{id}              Delete snapshot
+
+Tags:
+    POST /tags                          Create tag
+    POST /tags/{name}/resources         Tag a resource
+
+Pagination
+----------
+Uses `page` and `per_page` query params (max 200/page).
+This module auto-handles pagination by following `links.pages.next` URLs.
+"""
 
 import re
 from typing import Any

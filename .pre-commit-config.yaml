@@ -22,6 +22,7 @@ repos:
         exclude: ^tobcloud/templates/  # Jinja2 templates aren't valid YAML
       - id: check-toml
       - id: check-merge-conflict
+      - id: check-added-large-files
 
   # ty type checking (no official pre-commit hook, use local)
   - repo: local
@@ -33,7 +34,7 @@ repos:
         types: [python]
         pass_filenames: false
 
-  # Shell script linting (checks lint.sh)
+  # Shell script linting
   - repo: https://github.com/koalaman/shellcheck-precommit
     rev: v0.10.0
     hooks:
