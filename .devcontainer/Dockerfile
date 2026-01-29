@@ -11,6 +11,7 @@ WORKDIR /home/vscode
 ENV PATH="/home/vscode/.local/bin:$PATH"
 
 # Install Claude Code (installs to ~/.local/bin/claude)
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN curl -fsSL https://claude.ai/install.sh | bash && \
     claude plugin marketplace add trailofbits/skills && \
     claude plugin marketplace add anthropics/skills && \
@@ -21,7 +22,7 @@ ENV DEVCONTAINER=true
 ENV EDITOR=nano
 
 # Configure zsh and add aliases
-RUN echo 'export HISTFILE="$HOME/.zsh_history_data/.zsh_history"' >> ~/.zshrc && \
-    echo 'alias yolo="claude --dangerously-skip-permissions"' >> ~/.zshrc
+RUN echo "export HISTFILE=\"\$HOME/.zsh_history_data/.zsh_history\"" >> ~/.zshrc && \
+    echo "alias yolo=\"claude --dangerously-skip-permissions\"" >> ~/.zshrc
 
 WORKDIR /workspace
