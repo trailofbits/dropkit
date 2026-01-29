@@ -341,6 +341,60 @@ def ensure_ssh_config(
     return ssh_hostname
 
 
+def cleanup_ssh_entries(
+    config: TobcloudConfig,
+    droplet_name: str,
+    *,
+    prompt_known_hosts: bool = True,
+) -> None:
+    """
+    Remove SSH config entry and optionally clean up known_hosts for a droplet.
+
+    Args:
+        config: TobcloudConfig instance with SSH settings.
+        droplet_name: Name of the droplet being removed.
+        prompt_known_hosts: If True, prompt user before removing known_hosts entries.
+    """
+    ssh_hostname = get_ssh_hostname(droplet_name)
+
+    # Get IP BEFORE removing SSH config (needed for known_hosts cleanup)
+    ssh_ip = get_ssh_host_ip(config.ssh.config_path, ssh_hostname)
+
+    # Remove SSH config entry
+    if host_exists(config.ssh.config_path, ssh_hostname):
+        try:
+            remove_ssh_host(config.ssh.config_path, ssh_hostname)
+            console.print(
+                f"[green]✓[/green] Removed SSH config entry for [cyan]{ssh_hostname}[/cyan]"
+            )
+        except Exception as e:
+            console.print(f"[yellow]⚠[/yellow] Could not remove SSH config entry: {e}")
+    else:
+        console.print(f"[dim]SSH config entry for {ssh_hostname} not found (skipped)[/dim]")
+
+    # Clean up known_hosts
+    should_remove = not prompt_known_hosts or Confirm.ask(
+        "Remove SSH fingerprint from known_hosts?", default=True
+    )
+
+    if should_remove:
+        known_hosts_path = str(Path(config.ssh.config_path).parent / "known_hosts")
+        hostnames_to_remove = [ssh_hostname]
+        if ssh_ip:
+            hostnames_to_remove.append(ssh_ip)
+        try:
+            removed = remove_known_hosts_entry(known_hosts_path, hostnames_to_remove)
+            if removed:
+                console.print(
+                    f"[green]✓[/green] Removed {removed} known_hosts "
+                    f"{'entry' if removed == 1 else 'entries'}"
+                )
+            else:
+                console.print("[dim]No matching entries in known_hosts[/dim]")
+        except Exception as e:
+            console.print(f"[yellow]⚠[/yellow] Could not remove known_hosts entry: {e}")
+
+
 def get_user_tag(username: str) -> str:
     """
     Get the user tag for filtering droplets.
@@ -2562,18 +2616,8 @@ def destroy(droplet_name: str = typer.Argument(..., autocompletion=complete_drop
         api.delete_droplet(droplet_id)
         console.print("[green]✓[/green] Droplet destroyed")
 
-        # Remove SSH config entry
-        ssh_hostname = get_ssh_hostname(droplet_name)
-        if host_exists(config.ssh.config_path, ssh_hostname):
-            try:
-                remove_ssh_host(config.ssh.config_path, ssh_hostname)
-                console.print(
-                    f"[green]✓[/green] Removed SSH config entry for [cyan]{ssh_hostname}[/cyan]"
-                )
-            except Exception as e:
-                console.print(f"[yellow]⚠[/yellow] Could not remove SSH config entry: {e}")
-        else:
-            console.print(f"[dim]SSH config entry for {ssh_hostname} not found (skipped)[/dim]")
+        # Remove SSH config entry and clean up known_hosts
+        cleanup_ssh_entries(config, droplet_name, prompt_known_hosts=True)
 
         console.print()
         console.print("[bold green]Droplet successfully destroyed[/bold green]")
@@ -2639,33 +2683,8 @@ def _complete_hibernate(
     api.delete_droplet(droplet_id)
     console.print("[green]✓[/green] Droplet destroyed")
 
-    # Remove SSH config entry
-    ssh_hostname = get_ssh_hostname(droplet_name)
-    ssh_ip = get_ssh_host_ip(config.ssh.config_path, ssh_hostname)
-    if host_exists(config.ssh.config_path, ssh_hostname):
-        try:
-            remove_ssh_host(config.ssh.config_path, ssh_hostname)
-            console.print("[green]✓[/green] SSH config entry removed")
-        except Exception as e:
-            console.print(f"[yellow]⚠[/yellow] Could not remove SSH config entry: {e}")
-
-    # Prompt for known_hosts cleanup
-    if Confirm.ask("Remove SSH fingerprint from known_hosts?", default=True):
-        known_hosts_path = str(Path(config.ssh.config_path).parent / "known_hosts")
-        hostnames_to_remove = [ssh_hostname]
-        if ssh_ip:
-            hostnames_to_remove.append(ssh_ip)
-        try:
-            removed = remove_known_hosts_entry(known_hosts_path, hostnames_to_remove)
-            if removed:
-                console.print(
-                    f"[green]✓[/green] Removed {removed} known_hosts "
-                    f"{'entry' if removed == 1 else 'entries'}"
-                )
-            else:
-                console.print("[dim]No matching entries in known_hosts[/dim]")
-        except Exception as e:
-            console.print(f"[yellow]⚠[/yellow] Could not remove known_hosts entry: {e}")
+    # Remove SSH config entry and clean up known_hosts
+    cleanup_ssh_entries(config, droplet_name, prompt_known_hosts=True)
 
     # Summary
     console.print()
