@@ -1,6 +1,7 @@
 """SSH config file management."""
 
 import shutil
+import subprocess
 from pathlib import Path
 
 
@@ -226,78 +227,34 @@ def remove_known_hosts_entry(known_hosts_path: str, hostnames: list[str]) -> int
     """
     Remove entries for specified hostnames from known_hosts file.
 
+    Uses ssh-keygen -R which properly handles hashed entries.
+
     Args:
         known_hosts_path: Path to known_hosts file (e.g., ~/.ssh/known_hosts)
         hostnames: List of hostnames/IPs to remove
 
     Returns:
-        Number of entries removed
+        Number of hostnames for which entries were removed
     """
     known_hosts_file = Path(known_hosts_path).expanduser()
 
     if not known_hosts_file.exists():
         return 0
 
-    # Backup existing known_hosts before modifying
-    _backup_config(known_hosts_file)
-
-    # Read existing known_hosts
-    with open(known_hosts_file) as f:
-        lines = f.readlines()
-
-    # Normalize hostnames for matching (lowercase)
-    hostnames_lower = {h.lower() for h in hostnames}
-
-    # Filter out matching entries
-    new_lines = []
     removed_count = 0
 
-    for line in lines:
-        stripped = line.strip()
-
-        # Skip empty lines and comments, preserve them
-        if not stripped or stripped.startswith("#"):
-            new_lines.append(line)
-            continue
-
-        # Skip hashed entries (can't match them)
-        if stripped.startswith("|1|"):
-            new_lines.append(line)
-            continue
-
-        # Parse the first field (comma-separated hostnames)
-        # Format: hostname[,hostname2,...] keytype key [comment]
-        parts = stripped.split(None, 1)
-        if not parts:
-            new_lines.append(line)
-            continue
-
-        host_field = parts[0]
-        entry_hosts = host_field.split(",")
-
-        # Check if any of our hostnames match any entry host
-        should_remove = False
-        for entry_host in entry_hosts:
-            # Handle bracketed entries like [hostname]:port
-            check_host = entry_host.lower()
-            if check_host.startswith("["):
-                # Extract hostname from [hostname]:port
-                bracket_end = check_host.find("]")
-                if bracket_end > 0:
-                    check_host = check_host[1:bracket_end]
-
-            if check_host in hostnames_lower:
-                should_remove = True
-                break
-
-        if should_remove:
+    for hostname in hostnames:
+        result = subprocess.run(
+            ["ssh-keygen", "-R", hostname, "-f", str(known_hosts_file)],
+            capture_output=True,
+            text=True,
+        )
+        # ssh-keygen -R returns 0 even if hostname not found
+        # When it removes an entry, it prints to stdout:
+        # "# Host <hostname> found: line N"
+        # "<file> updated."
+        # "Original contents retained as <file>.old"
+        if "updated" in result.stdout:
             removed_count += 1
-        else:
-            new_lines.append(line)
-
-    # Only write if we removed something
-    if removed_count > 0:
-        with open(known_hosts_file, "w") as f:
-            f.writelines(new_lines)
 
     return removed_count

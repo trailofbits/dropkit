@@ -343,7 +343,11 @@ def ensure_ssh_config(
 
 
 def cleanup_ssh_entries(
-    config: DropkitConfig, droplet_name: str, prompt_known_hosts: bool = True
+    config: DropkitConfig,
+    droplet_name: str,
+    prompt_known_hosts: bool = True,
+    public_ip: str | None = None,
+    tailscale_ip: str | None = None,
 ) -> None:
     """
     Remove SSH config entry and optionally clean up known_hosts for a droplet.
@@ -352,6 +356,10 @@ def cleanup_ssh_entries(
         config: DropkitConfig instance with SSH settings.
         droplet_name: Name of the droplet being removed.
         prompt_known_hosts: If True, prompt user before removing known_hosts entries.
+        public_ip: Public IP of the droplet (for known_hosts cleanup when SSH config
+            has a different IP, e.g., Tailscale IP).
+        tailscale_ip: Tailscale IP of the droplet (for known_hosts cleanup when SSH
+            config has the public IP but user also connected via Tailscale).
     """
     ssh_hostname = get_ssh_hostname(droplet_name)
 
@@ -381,6 +389,12 @@ def cleanup_ssh_entries(
         hostnames_to_remove = [ssh_hostname]
         if ssh_ip:
             hostnames_to_remove.append(ssh_ip)
+        # Include public IP if different from SSH config IP (e.g., when using Tailscale)
+        if public_ip and public_ip not in hostnames_to_remove:
+            hostnames_to_remove.append(public_ip)
+        # Include Tailscale IP if different from SSH config IP
+        if tailscale_ip and tailscale_ip not in hostnames_to_remove:
+            hostnames_to_remove.append(tailscale_ip)
         console.print(f"[dim]Hostnames to find: {hostnames_to_remove}[/dim]")
         try:
             removed = remove_known_hosts_entry(known_hosts_path, hostnames_to_remove)
@@ -1039,6 +1053,51 @@ def prepare_for_hibernate(
                 console.print(f"[dim]Could not update SSH config: {e}[/dim]")
 
     return True
+
+
+def get_tailscale_ip(ssh_hostname: str) -> str | None:
+    """
+    Get Tailscale IP address from a running droplet.
+
+    SSHes to the droplet and runs 'tailscale ip -4' to get the Tailscale IP.
+    This is a single attempt (not polling) and will return None if unreachable
+    or Tailscale is not running.
+
+    Args:
+        ssh_hostname: SSH hostname to connect to
+
+    Returns:
+        Tailscale IP address if found, None otherwise
+    """
+    try:
+        result = subprocess.run(
+            [
+                "ssh",
+                "-o",
+                "StrictHostKeyChecking=no",
+                "-o",
+                "UserKnownHostsFile=/dev/null",
+                "-o",
+                "ConnectTimeout=5",
+                "-o",
+                "BatchMode=yes",
+                ssh_hostname,
+                "tailscale ip -4 2>/dev/null",
+            ],
+            capture_output=True,
+            timeout=15,
+        )
+
+        output = result.stdout.decode("utf-8", errors="ignore").strip()
+
+        # Validate it's a valid Tailscale CGNAT IP (100.64.0.0/10 range)
+        if output and is_tailscale_ip(output):
+            return output
+
+    except (subprocess.TimeoutExpired, subprocess.SubprocessError):
+        pass
+
+    return None
 
 
 def wait_for_tailscale_ip(
@@ -2560,11 +2619,13 @@ def destroy(droplet_name: str = typer.Argument(..., autocompletion=complete_drop
         info_table.add_row("Status:", status)
 
         # Get IP address
+        droplet_public_ip = None
         networks = droplet.get("networks", {})
         v4_networks = networks.get("v4", [])
         for network in v4_networks:
             if network.get("type") == "public":
-                info_table.add_row("IP:", network.get("ip_address", "N/A"))
+                droplet_public_ip = network.get("ip_address")
+                info_table.add_row("IP:", droplet_public_ip or "N/A")
                 break
 
         info_table.add_row("Region:", droplet.get("region", {}).get("slug", "N/A"))
@@ -2606,9 +2667,15 @@ def destroy(droplet_name: str = typer.Argument(..., autocompletion=complete_drop
             console.print("[dim]Cancelled.[/dim]")
             raise typer.Exit(1)
 
-        # Logout from Tailscale if droplet is Tailscale-locked (best-effort)
-        if is_droplet_tailscale_locked(config, droplet_name):
-            ssh_hostname = get_ssh_hostname(droplet_name)
+        # Get Tailscale IP before destroying (for known_hosts cleanup)
+        ssh_hostname = get_ssh_hostname(droplet_name)
+        droplet_tailscale_ip = None
+        tailscale_locked = is_droplet_tailscale_locked(config, droplet_name)
+
+        if tailscale_locked:
+            # SSH config has the Tailscale IP - save it for cleanup
+            droplet_tailscale_ip = get_ssh_host_ip(config.ssh.config_path, ssh_hostname)
+            # Try to logout from Tailscale
             console.print()
             console.print("[dim]Logging out from Tailscale...[/dim]")
             if tailscale_logout(ssh_hostname):
@@ -2618,6 +2685,12 @@ def destroy(droplet_name: str = typer.Argument(..., autocompletion=complete_drop
                     "[yellow]⚠[/yellow] Could not logout from Tailscale "
                     "(device may remain in Tailscale admin console)"
                 )
+        else:
+            # SSH config has public IP, try to get Tailscale IP via SSH
+            console.print("[dim]Checking for Tailscale IP...[/dim]")
+            droplet_tailscale_ip = get_tailscale_ip(ssh_hostname)
+            if droplet_tailscale_ip:
+                console.print(f"[dim]Found Tailscale IP: {droplet_tailscale_ip}[/dim]")
 
         # Proceed with deletion
         console.print()
@@ -2627,7 +2700,13 @@ def destroy(droplet_name: str = typer.Argument(..., autocompletion=complete_drop
         console.print("[green]✓[/green] Droplet destroyed")
 
         # Remove SSH config entry and clean up known_hosts
-        cleanup_ssh_entries(config, droplet_name, prompt_known_hosts=True)
+        cleanup_ssh_entries(
+            config,
+            droplet_name,
+            prompt_known_hosts=True,
+            public_ip=droplet_public_ip,
+            tailscale_ip=droplet_tailscale_ip,
+        )
 
         console.print()
         console.print("[bold green]Droplet successfully destroyed[/bold green]")
@@ -2646,6 +2725,8 @@ def _complete_hibernate(
     username: str,
     size_slug: str,
     tailscale_locked: bool = False,
+    public_ip: str | None = None,
+    tailscale_ip: str | None = None,
 ) -> None:
     """
     Complete hibernate after snapshot is done (tag, destroy, cleanup, success message).
@@ -2665,6 +2746,8 @@ def _complete_hibernate(
         username: Username for tagging
         size_slug: Size slug for tagging
         tailscale_locked: If True, tag snapshot with tailscale-lockdown
+        public_ip: Public IP of the droplet (for known_hosts cleanup)
+        tailscale_ip: Tailscale IP of the droplet (for known_hosts cleanup)
     """
     user_tag = get_user_tag(username)
 
@@ -2694,7 +2777,13 @@ def _complete_hibernate(
     console.print("[green]✓[/green] Droplet destroyed")
 
     # Remove SSH config entry and clean up known_hosts
-    cleanup_ssh_entries(config, droplet_name, prompt_known_hosts=True)
+    cleanup_ssh_entries(
+        config,
+        droplet_name,
+        prompt_known_hosts=True,
+        public_ip=public_ip,
+        tailscale_ip=tailscale_ip,
+    )
 
     # Summary
     console.print()
@@ -3399,6 +3488,32 @@ def hibernate(
         status = droplet.get("status", "")
         size_slug = droplet.get("size_slug", "")
 
+        # Extract public IP for known_hosts cleanup
+        droplet_public_ip = None
+        networks = droplet.get("networks", {})
+        v4_networks = networks.get("v4", [])
+        for network in v4_networks:
+            if network.get("type") == "public":
+                droplet_public_ip = network.get("ip_address")
+                break
+
+        # Get Tailscale IP for known_hosts cleanup
+        # Must be done BEFORE prepare_for_tailscale_hibernate() changes the SSH config
+        ssh_hostname = get_ssh_hostname(droplet_name)
+        droplet_tailscale_ip = None
+        tailscale_locked = is_droplet_tailscale_locked(config, droplet_name)
+        if tailscale_locked:
+            # SSH config currently has the Tailscale IP - save it before it gets changed
+            droplet_tailscale_ip = get_ssh_host_ip(config.ssh.config_path, ssh_hostname)
+            if droplet_tailscale_ip:
+                console.print(f"[dim]Saved Tailscale IP: {droplet_tailscale_ip}[/dim]")
+        else:
+            # SSH config has public IP, try to get Tailscale IP via SSH
+            console.print("[dim]Checking for Tailscale IP...[/dim]")
+            droplet_tailscale_ip = get_tailscale_ip(ssh_hostname)
+            if droplet_tailscale_ip:
+                console.print(f"[dim]Found Tailscale IP: {droplet_tailscale_ip}[/dim]")
+
         # Generate snapshot name
         snapshot_name = get_snapshot_name(droplet_name)
 
@@ -3438,12 +3553,11 @@ def hibernate(
             elif action_status == "completed":
                 console.print("[green]✓[/green] Snapshot already completed")
 
-            # Detect Tailscale lockdown before completing
-            tailscale_locked = is_droplet_tailscale_locked(config, droplet_name)
+            # Complete the hibernate (tag, destroy, cleanup)
+            # Note: tailscale_locked was already detected earlier
             if tailscale_locked:
                 console.print("[dim]Detected Tailscale lockdown[/dim]")
 
-            # Complete the hibernate (tag, destroy, cleanup)
             _complete_hibernate(
                 api,
                 config,
@@ -3453,6 +3567,8 @@ def hibernate(
                 username,
                 size_slug,
                 tailscale_locked=tailscale_locked,
+                public_ip=droplet_public_ip,
+                tailscale_ip=droplet_tailscale_ip,
             )
             return  # Exit early, skip normal flow
 
@@ -3560,6 +3676,8 @@ def hibernate(
             username,
             size_slug,
             tailscale_locked=tailscale_locked,
+            public_ip=droplet_public_ip,
+            tailscale_ip=droplet_tailscale_ip,
         )
 
     except DigitalOceanAPIError as e:
