@@ -24,39 +24,13 @@ A command-line tool for managing DigitalOcean droplets with automated setup, SSH
 
 ## Installation
 
-### Install uv (if not already installed)
-
 ```bash
-# macOS/Linux
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Or with Homebrew
-brew install uv
-```
-
-### Install dropkit
-
-```bash
-# Based on what you have configured on your machine, use one or the other, so you do not have to insert any username/password
+# HTTPS or SSH depending on your GitHub setup
 uv tool install git+https://github.com/trailofbits/dropkit.git
 uv tool install git+ssh://git@github.com/trailofbits/dropkit.git
-```
 
-This installs `dropkit` as a global command-line tool.
-
-## Upgrading
-
-To upgrade to the latest version:
-
-```bash
+# Upgrade
 uv tool upgrade dropkit
-```
-
-Or reinstall from the latest git version:
-
-```bash
-uv tool uninstall dropkit
-uv tool install git+https://github.com/trailofbits/dropkit.git
 ```
 
 ## Quick Start
@@ -109,7 +83,7 @@ Your user account is already set up with your SSH keys.
 ```
 Usage: dropkit [OPTIONS] COMMAND [ARGS]...
 
-Manage DigitalOcean droplets for ToB engineers
+Manage DigitalOcean droplets
 
 Commands:
   init             Initialize dropkit configuration.
@@ -149,16 +123,9 @@ All droplets are automatically tagged with:
 
 ### Projects
 
-Organize your droplets into DigitalOcean projects:
-
-- **Set default project** during `dropkit init` - all new droplets will be assigned to this project
-  - The init wizard will suggest your DigitalOcean default project if you have one
-  - Just press Enter to accept it, or type a different project name/ID
-- **Override per-droplet** using `--project <name>` flag with `dropkit create`
-- Project assignment happens automatically after droplet creation
-- **Tab completion** available for project names when using shell completion
-
-You can specify projects by name (e.g., `--project "My Project"`) or by UUID. Type `?` during the init wizard to see all available projects.
+- **Set default project** during `dropkit init` (type `?` to see available projects)
+- **Override per-droplet** using `--project <name>` with `dropkit create`
+- Specify by name or UUID; tab completion available
 
 ### SSH Hostname Convention
 
@@ -180,20 +147,15 @@ dropkit --install-completion zsh
 dropkit --install-completion bash
 ```
 
-After installation, restart your shell or source your configuration file. You can then use tab completion with commands that accept droplet names:
+After installation, restart your shell. Tab completion dynamically fetches your droplets from DigitalOcean:
 
 ```bash
 dropkit info <TAB>             # Shows your droplets
-dropkit rename <TAB>           # Shows your droplets
 dropkit destroy <TAB>          # Shows your droplets
 dropkit resize <TAB>           # Shows your droplets
 dropkit on <TAB>               # Shows your droplets
 dropkit off <TAB>              # Shows your droplets
-dropkit config-ssh <TAB>       # Shows your droplets
-dropkit enable-tailscale <TAB> # Shows your droplets
 ```
-
-The completion dynamically fetches your droplets from DigitalOcean, showing only those tagged with your username.
 
 ### Hibernate and Wake (Cost Saving)
 
@@ -273,16 +235,7 @@ uv run pytest -v           # Verbose output
 uv run pytest -k "test_*"  # Run specific tests
 ```
 
-**Test Coverage**: 134 tests covering API client, configuration validation, SSH config management, and helper functions.
-
-### Code Quality
-
-```bash
-prek run              # Run all checks (ruff, ty, shellcheck)
-uv run ruff format .   # Format code
-uv run ruff check .    # Lint code
-uv run ty check dropkit/   # Type check
-```
+**Test Coverage**: Comprehensive suite covering API client, configuration validation, SSH config management, and helper functions.
 
 ## Technology Stack
 
@@ -296,81 +249,16 @@ uv run ty check dropkit/   # Type check
 
 ## Appendix: API Token Permissions
 
-### Understanding DigitalOcean API Token Scopes
-
-DigitalOcean uses **custom scopes** to control what actions an API token can perform. When creating your API token, you can choose between:
-- **Full Access** (all permissions) - simpler but less secure
-- **Custom Scopes** (specific permissions) - more secure, recommended
-
-### Required Scopes for dropkit
-
-To use all features of dropkit, your DigitalOcean API token needs these **23 specific scopes**:
-
-#### Account (Full Management)
-- `account:read` - View account details (used to fetch your email for username)
-
-#### Actions (Full Management)
-- `actions:read` - View action status (monitor resize/power operations)
-
-#### Droplets (Create + Read + Update + Delete)
-- `droplet:create` - Create droplets
-- `droplet:read` - View droplets (list, get info)
-- `droplet:update` - Modify droplets (resize, power on/off)
-- `droplet:delete` - Delete droplets
-
-#### Image (Full Management)
-- `image:create` - Create images
-- `image:read` - View images (for interactive prompts)
-- `image:update` - Modify images
-- `image:delete` - Delete images
-
-#### Projects (Read + Update)
-- `project:read` - View projects (list, get default project)
-- `project:update` - Modify projects (assign droplets to projects)
-
-#### Regions (Full Management)
-- `regions:read` - View data center regions (for interactive prompts)
-
-#### Sizes (Full Management)
-- `sizes:read` - View droplet plan sizes (for interactive prompts)
-
-#### Snapshots (Full Management)
-- `snapshot:read` - View snapshots (list, get info for hibernate/wake)
-- `snapshot:delete` - Delete snapshots (for wake command cleanup)
-
-#### SSH Keys (Full Management)
-- `ssh_key:create` - Upload SSH keys
-- `ssh_key:read` - View SSH keys (list, check if exists)
-- `ssh_key:update` - Modify SSH keys (update names)
-- `ssh_key:delete` - Delete SSH keys
-
-#### Tags (Create + Read)
-- `tag:read` - Filter droplets by tags (for owner-based filtering)
-- `tag:create` - Create tags when creating droplets (owner, firewall tags)
-
-#### VPC (Read-Only)
-- `vpc:read` - View VPC networks (required by other DigitalOcean operations)
-
-### How to Create Your Token
-
-#### Option 1: Custom Scopes (Recommended - Most Secure)
+### Creating Your Token
 
 1. Go to [DigitalOcean API Tokens](https://cloud.digitalocean.com/account/api/tokens)
-2. Click **Generate New Token**
-3. Give it a descriptive name (e.g., "dropkit-cli")
-4. Select **Custom Scopes**
-5. Check all 23 scopes listed above
-6. Set expiration period (or no expiration)
-7. Click **Generate Token**
+2. Click **Generate New Token** with name "dropkit-cli"
+3. Select **Custom Scopes** (recommended) or **Full Access** (simpler)
+4. For custom scopes, enable the 23 scopes listed below
 
-#### Option 2: Full Access (Simpler)
+### Required Scopes (23 total)
 
-1. Go to [DigitalOcean API Tokens](https://cloud.digitalocean.com/account/api/tokens)
-2. Click **Generate New Token**
-3. Give it a descriptive name (e.g., "dropkit-cli")
-4. Select **Full Access** or **Read and Write**
-5. Set expiration period
-6. Click **Generate Token**
+`account:read`, `actions:read`, `droplet:create`, `droplet:read`, `droplet:update`, `droplet:delete`, `image:create`, `image:read`, `image:update`, `image:delete`, `project:read`, `project:update`, `regions:read`, `sizes:read`, `snapshot:read`, `snapshot:delete`, `ssh_key:create`, `ssh_key:read`, `ssh_key:update`, `ssh_key:delete`, `tag:read`, `tag:create`, `vpc:read`
 
 ### Scope Reference by Feature
 
