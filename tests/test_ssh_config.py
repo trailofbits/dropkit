@@ -792,17 +792,17 @@ otherhost ssh-rsa AAAA...
 
     def test_remove_multiple_entries(self, temp_known_hosts):
         """Test removing hostname and IP address together."""
-        existing = """tobcloud.myhost ssh-ed25519 AAAA...
+        existing = """dropkit.myhost ssh-ed25519 AAAA...
 100.80.123.45 ssh-ed25519 AAAA...
 otherhost ssh-rsa AAAA...
 """
         Path(temp_known_hosts).write_text(existing)
 
-        result = remove_known_hosts_entry(temp_known_hosts, ["tobcloud.myhost", "100.80.123.45"])
+        result = remove_known_hosts_entry(temp_known_hosts, ["dropkit.myhost", "100.80.123.45"])
 
         assert result == 2
         content = Path(temp_known_hosts).read_text()
-        assert "tobcloud.myhost" not in content
+        assert "dropkit.myhost" not in content
         assert "100.80.123.45" not in content
         assert "otherhost" in content
 
@@ -966,20 +966,20 @@ otherhost ssh-rsa AAAA...
         content = Path(temp_known_hosts).read_text()
         assert content.strip() == ""
 
-    def test_tobcloud_hostname_format(self, temp_known_hosts):
-        """Test removing tobcloud-style hostname."""
-        existing = """tobcloud.my-droplet ssh-ed25519 AAAA...
+    def test_dropkit_hostname_format(self, temp_known_hosts):
+        """Test removing dropkit-style hostname."""
+        existing = """dropkit.my-droplet ssh-ed25519 AAAA...
 100.80.123.45 ssh-ed25519 AAAA...
 otherhost ssh-rsa AAAA...
 """
         Path(temp_known_hosts).write_text(existing)
 
         result = remove_known_hosts_entry(
-            temp_known_hosts, ["tobcloud.my-droplet", "100.80.123.45"]
+            temp_known_hosts, ["dropkit.my-droplet", "100.80.123.45"]
         )
 
         assert result == 2
         content = Path(temp_known_hosts).read_text()
-        assert "tobcloud.my-droplet" not in content
+        assert "dropkit.my-droplet" not in content
         assert "100.80.123.45" not in content
         assert "otherhost" in content
