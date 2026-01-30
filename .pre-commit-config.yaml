@@ -19,7 +19,7 @@ repos:
       - id: trailing-whitespace
       - id: end-of-file-fixer
       - id: check-yaml
-        exclude: ^tobcloud/templates/  # Jinja2 templates aren't valid YAML
+        exclude: ^dropkit/templates/  # Jinja2 templates aren't valid YAML
       - id: check-toml
       - id: check-merge-conflict
       - id: check-added-large-files
@@ -29,7 +29,7 @@ repos:
     hooks:
       - id: ty-check
         name: ty type check
-        entry: uv run ty check tobcloud/
+        entry: uv run ty check dropkit/
         language: system
         types: [python]
         pass_filenames: false

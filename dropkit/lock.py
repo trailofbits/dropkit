@@ -1,4 +1,4 @@
-"""File-based locking to prevent concurrent tobcloud write operations."""
+"""File-based locking to prevent concurrent dropkit write operations."""
 
 import fcntl
 import json
@@ -13,7 +13,7 @@ import typer
 from rich.console import Console
 
 # Lock file location
-LOCK_FILE = Path("/tmp/tobcloud.lock")
+LOCK_FILE = Path("/tmp/dropkit.lock")
 
 # Default timeout for acquiring lock (seconds)
 DEFAULT_TIMEOUT = 30.0
@@ -82,7 +82,7 @@ def operation_lock(
     timeout: float | None = None,
 ) -> Generator[None, None, None]:
     """
-    Context manager that acquires an exclusive lock for tobcloud operations.
+    Context manager that acquires an exclusive lock for dropkit operations.
 
     Uses fcntl.flock() which automatically releases the lock when:
     - The context manager exits normally
@@ -130,7 +130,7 @@ def operation_lock(
             lock_info = LockInfo.from_file(LOCK_FILE)
             if lock_info and lock_info.is_process_alive():
                 raise LockError(
-                    f"Another tobcloud operation is in progress.\n"
+                    f"Another dropkit operation is in progress.\n"
                     f"  Command: {lock_info.command}\n"
                     f"  PID: {lock_info.pid}\n"
                     f"Wait for it to complete or check if it's stuck."

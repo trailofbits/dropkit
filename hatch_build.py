@@ -24,7 +24,7 @@ class CustomBuildHook(BuildHookInterface):
                 commit = result.stdout.strip()
                 if commit:
                     # Write commit to a file that will be included in the package
-                    version_file = Path(self.root) / "tobcloud" / "_version.txt"
+                    version_file = Path(self.root) / "dropkit" / "_version.txt"
                     version_file.write_text(commit)
                     print(f"Embedded git commit: {commit}")
         except Exception as e:

@@ -1,12 +1,12 @@
-"""Version checking functionality for tobcloud."""
+"""Version checking functionality for dropkit."""
 
 import json
 import subprocess
 import time
 from pathlib import Path
 
-from tobcloud import __version__
-from tobcloud.config import Config
+from dropkit import __version__
+from dropkit.config import Config
 
 
 def get_last_check_file() -> Path:
@@ -63,7 +63,7 @@ def get_latest_git_commit() -> str | None:
             [
                 "git",
                 "ls-remote",
-                "https://github.com/trailofbits/tobcloud.git",
+                "https://github.com/trailofbits/dropkit.git",
                 "HEAD",
             ],
             capture_output=True,
@@ -183,5 +183,5 @@ def check_for_updates() -> None:
             f"[dim](current: {current_commit or __version__})[/dim]"
         )
         console.print(
-            "[yellow]Run[/yellow] [cyan]uv tool upgrade tobcloud[/cyan] [yellow]to update[/yellow]\n"
+            "[yellow]Run[/yellow] [cyan]uv tool upgrade dropkit[/cyan] [yellow]to update[/yellow]\n"
         )

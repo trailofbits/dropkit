@@ -5,20 +5,20 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from tobcloud.config import (
+from dropkit.config import (
     CloudInitConfig,
     Config,
     DefaultsConfig,
     DigitalOceanConfig,
+    DropkitConfig,
     SSHConfig,
-    TobcloudConfig,
 )
 
 
 @pytest.fixture
 def temp_config_dir(tmp_path):
     """Create a temporary config directory for testing."""
-    config_dir = tmp_path / ".config" / "tobcloud"
+    config_dir = tmp_path / ".config" / "dropkit"
     config_dir.mkdir(parents=True)
     yield config_dir
 
@@ -38,7 +38,7 @@ def valid_config_dict():
             "extra_tags": ["custom-tag"],
         },
         "cloudinit": {
-            "template_path": "/home/user/.config/tobcloud/cloud-init.yaml",
+            "template_path": "/home/user/.config/dropkit/cloud-init.yaml",
             "ssh_keys": ["/home/user/.ssh/id_ed25519.pub"],
             "ssh_key_ids": [12345678],
         },
@@ -229,12 +229,12 @@ class TestSSHConfig:
             SSHConfig(config_path="/home/user/.ssh/config")
 
 
-class TestTobcloudConfig:
-    """Tests for TobcloudConfig (full configuration) validation."""
+class TestDropkitConfig:
+    """Tests for DropkitConfig (full configuration) validation."""
 
     def test_valid_full_config(self, valid_config_dict):
         """Test valid full configuration."""
-        config = TobcloudConfig(**valid_config_dict)
+        config = DropkitConfig(**valid_config_dict)
         assert config.digitalocean.token == "dop_v1_test_token_12345"
         assert config.defaults.region == "nyc3"
         assert config.cloudinit.ssh_keys[0] == "/home/user/.ssh/id_ed25519.pub"
@@ -244,38 +244,38 @@ class TestTobcloudConfig:
         """Test that missing digitalocean section fails validation."""
         del valid_config_dict["digitalocean"]
         with pytest.raises(ValidationError):
-            TobcloudConfig(**valid_config_dict)
+            DropkitConfig(**valid_config_dict)
 
     def test_missing_defaults_section_fails(self, valid_config_dict):
         """Test that missing defaults section fails validation."""
         del valid_config_dict["defaults"]
         with pytest.raises(ValidationError):
-            TobcloudConfig(**valid_config_dict)
+            DropkitConfig(**valid_config_dict)
 
     def test_missing_cloudinit_section_fails(self, valid_config_dict):
         """Test that missing cloudinit section fails validation."""
         del valid_config_dict["cloudinit"]
         with pytest.raises(ValidationError):
-            TobcloudConfig(**valid_config_dict)
+            DropkitConfig(**valid_config_dict)
 
     def test_missing_ssh_section_fails(self, valid_config_dict):
         """Test that missing ssh section fails validation."""
         del valid_config_dict["ssh"]
         with pytest.raises(ValidationError):
-            TobcloudConfig(**valid_config_dict)
+            DropkitConfig(**valid_config_dict)
 
     def test_extra_fields_forbidden(self, valid_config_dict):
         """Test that extra fields are forbidden."""
         valid_config_dict["extra_field"] = "not allowed"
         with pytest.raises(ValidationError) as exc_info:
-            TobcloudConfig(**valid_config_dict)
+            DropkitConfig(**valid_config_dict)
         assert "extra_field" in str(exc_info.value).lower()
 
     def test_nested_validation_error(self, valid_config_dict):
         """Test that nested validation errors are caught."""
         valid_config_dict["digitalocean"]["token"] = ""
         with pytest.raises(ValidationError) as exc_info:
-            TobcloudConfig(**valid_config_dict)
+            DropkitConfig(**valid_config_dict)
         assert "token" in str(exc_info.value).lower()
 
 
@@ -402,7 +402,7 @@ class TestConfigManager:
         config = Config()
         with pytest.raises(FileNotFoundError) as exc_info:
             config.load()
-        assert "tobcloud init" in str(exc_info.value)
+        assert "dropkit init" in str(exc_info.value)
 
     def test_get_system_username(self, monkeypatch):
         """Test getting system username."""

@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
-from tobcloud.lock import (
+from dropkit.lock import (
     DEFAULT_TIMEOUT,
     LOCK_FILE,
     LockError,
@@ -22,8 +22,8 @@ from tobcloud.lock import (
 @pytest.fixture
 def temp_lock_file(tmp_path):
     """Use a temporary lock file for testing."""
-    test_lock = tmp_path / "tobcloud.lock"
-    with patch("tobcloud.lock.LOCK_FILE", test_lock):
+    test_lock = tmp_path / "dropkit.lock"
+    with patch("dropkit.lock.LOCK_FILE", test_lock):
         yield test_lock
 
 
@@ -126,7 +126,7 @@ class TestConcurrentLock:
 
     def test_concurrent_lock_blocks(self, tmp_path):
         """Test that second process waits for first to release lock."""
-        test_lock = tmp_path / "tobcloud.lock"
+        test_lock = tmp_path / "dropkit.lock"
         results_file = tmp_path / "results.txt"
 
         # Script that holds lock and logs events
@@ -184,7 +184,7 @@ os.close(fd)
 
     def test_timeout_raises_lock_error(self, tmp_path):
         """Test that timeout raises LockError."""
-        test_lock = tmp_path / "tobcloud.lock"
+        test_lock = tmp_path / "dropkit.lock"
         ready_file = tmp_path / "ready"
 
         # Script that holds lock indefinitely until killed
@@ -213,14 +213,14 @@ time.sleep(30)  # Hold lock
                 pytest.fail("Holder did not acquire lock in time")
 
             # Now try to acquire with short timeout
-            with patch("tobcloud.lock.LOCK_FILE", test_lock):
+            with patch("dropkit.lock.LOCK_FILE", test_lock):
                 with pytest.raises(LockError) as exc_info:  # noqa: SIM117
                     with operation_lock("waiter", timeout=1):
                         pass
 
                 error_msg = str(exc_info.value)
                 assert (
-                    "Another tobcloud operation is in progress" in error_msg
+                    "Another dropkit operation is in progress" in error_msg
                     or "Could not acquire lock" in error_msg
                 )
         finally:
@@ -229,12 +229,12 @@ time.sleep(30)  # Hold lock
 
     def test_stale_lock_cleanup(self, tmp_path):
         """Test that stale locks from dead processes are handled."""
-        test_lock = tmp_path / "tobcloud.lock"
+        test_lock = tmp_path / "dropkit.lock"
         # Write stale lock info with dead PID
         test_lock.write_text('{"pid": 9999999, "command": "stale"}')
 
         # Should still be able to acquire lock
-        with patch("tobcloud.lock.LOCK_FILE", test_lock), operation_lock("new_command"):
+        with patch("dropkit.lock.LOCK_FILE", test_lock), operation_lock("new_command"):
             content = test_lock.read_text()
             assert "new_command" in content
 
@@ -278,7 +278,7 @@ class TestRequiresLockDecorator:
         """Test decorator handles LockError and exits."""
         import typer
 
-        test_lock = tmp_path / "tobcloud.lock"
+        test_lock = tmp_path / "dropkit.lock"
         ready_file = tmp_path / "ready"
 
         # Script that holds lock
@@ -307,8 +307,8 @@ time.sleep(30)
                 pytest.fail("Holder did not acquire lock in time")
 
             with (
-                patch("tobcloud.lock.LOCK_FILE", test_lock),
-                patch("tobcloud.lock.DEFAULT_TIMEOUT", 0.5),
+                patch("dropkit.lock.LOCK_FILE", test_lock),
+                patch("dropkit.lock.DEFAULT_TIMEOUT", 0.5),
             ):
 
                 @requires_lock("blocked")
@@ -333,13 +333,13 @@ class TestEdgeCases:
         assert DEFAULT_TIMEOUT == 30.0
 
     def test_lock_file_path(self):
-        """Test lock file path is /tmp/tobcloud.lock."""
-        assert Path("/tmp/tobcloud.lock") == LOCK_FILE
+        """Test lock file path is /tmp/dropkit.lock."""
+        assert Path("/tmp/dropkit.lock") == LOCK_FILE
 
     def test_lock_file_created_with_permissions(self, tmp_path):
         """Test lock file is created with restrictive permissions."""
-        test_lock = tmp_path / "tobcloud.lock"
-        with patch("tobcloud.lock.LOCK_FILE", test_lock):
+        test_lock = tmp_path / "dropkit.lock"
+        with patch("dropkit.lock.LOCK_FILE", test_lock):
             with operation_lock("test"):
                 pass
             # Check permissions (0o600 = owner read/write only)

@@ -23,8 +23,8 @@ Git worktrees create isolated workspaces sharing the same repository, allowing w
 
 ```bash
 # Create worktrees for parallel development
-git worktree add ../tobcloud-feature-a feature-a
-git worktree add ../tobcloud-feature-b feature-b
+git worktree add ../dropkit-feature-a feature-a
+git worktree add ../dropkit-feature-b feature-b
 
 # Each worktree gets its own directory with full codebase
 # Run Claude Code in each directory independently
@@ -45,7 +45,7 @@ git worktree add ../tobcloud-feature-b feature-b
 git worktree list
 
 # Remove a worktree when done
-git worktree remove ../tobcloud-feature-a
+git worktree remove ../dropkit-feature-a
 
 # Prune stale worktree entries
 git worktree prune
@@ -55,7 +55,7 @@ git worktree prune
 
 | Resource | Risk | Mitigation |
 |----------|------|------------|
-| `~/.config/tobcloud/` | User config is shared | Don't modify during parallel dev |
+| `~/.config/dropkit/` | User config is shared | Don't modify during parallel dev |
 | `~/.ssh/config` | SSH config is shared | Coordinate droplet names |
 | DigitalOcean API | Creating droplets with same name | Use unique droplet names per worktree |
 
@@ -73,11 +73,11 @@ git worktree prune
 ```
 You: I'm using the git-worktrees skill to set up an isolated workspace.
 
-[Create worktree: git worktree add ../tobcloud-auth feature/auth]
+[Create worktree: git worktree add ../dropkit-auth feature/auth]
 [Run uv sync]
 [Run uv run pytest - all passing]
 
-Worktree ready at ../tobcloud-auth
+Worktree ready at ../dropkit-auth
 Tests passing
 Ready to implement auth feature
 ```

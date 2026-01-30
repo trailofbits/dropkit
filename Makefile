@@ -4,7 +4,7 @@ dev:
 	uv sync --all-groups
 
 lint:
-	uv run ruff format --check . && uv run ruff check . && uv run ty check tobcloud/
+	uv run ruff format --check . && uv run ruff check . && uv run ty check dropkit/
 
 format:
 	uv run ruff format .

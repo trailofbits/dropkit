@@ -1,9 +1,25 @@
 [project]
-name = "tobcloud"
+name = "dropkit"
 version = "0.1.0"
 description = "Manage DigitalOcean droplets for ToB engineers"
 readme = "README.md"
 requires-python = ">=3.11"
+authors = [{name = "Trail of Bits", email = "opensource@trailofbits.com"}]
+license = {text = "Apache-2.0"}
+keywords = ["digitalocean", "droplet", "cli", "devops", "ssh", "tailscale", "cloud"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: System :: Systems Administration",
+]
 dependencies = [
     "typer>=0.9.0",
     "rich>=13.0.0",
@@ -16,7 +32,12 @@ dependencies = [
 ]
 
 [project.scripts]
-tobcloud = "tobcloud.main:app"
+dropkit = "dropkit.main:app"
+
+[project.urls]
+Homepage = "https://github.com/trailofbits/dropkit"
+Repository = "https://github.com/trailofbits/dropkit"
+Issues = "https://github.com/trailofbits/dropkit/issues"
 
 [tool.uv]
 package = true
@@ -29,14 +50,14 @@ build-backend = "hatchling.build"
 [tool.hatch.build.hooks.custom]
 
 [tool.hatch.build.targets.wheel]
-packages = ["tobcloud"]
+packages = ["dropkit"]
 
 [tool.hatch.build.targets.wheel.force-include]
-"tobcloud/_version.txt" = "tobcloud/_version.txt"
+"dropkit/_version.txt" = "dropkit/_version.txt"
 
 [tool.hatch.build.targets.sdist]
 [tool.hatch.build.targets.sdist.force-include]
-"tobcloud/_version.txt" = "tobcloud/_version.txt"
+"dropkit/_version.txt" = "dropkit/_version.txt"
 
 [dependency-groups]
 dev = [
@@ -151,4 +172,4 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = "--cov=tobcloud --cov-fail-under=29"
+addopts = "--cov=dropkit --cov-fail-under=29"

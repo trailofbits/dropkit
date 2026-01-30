@@ -1,11 +1,11 @@
-# tobcloud
+# dropkit
 
 A command-line tool for managing DigitalOcean droplets with automated setup, SSH configuration, and lifecycle management.
 
 ## Features
 
 - 🚀 **Quick droplet creation** with cloud-init automation
-- 🔑 **Automatic SSH configuration** - just run `ssh tobcloud.<droplet-name>`
+- 🔑 **Automatic SSH configuration** - just run `ssh dropkit.<droplet-name>`
 - 🔐 **Tailscale VPN** - secure access via Tailscale (enabled by default)
 - 👤 **User management** - automatically creates your user account on droplets
 - 🏷️ **Smart tagging** - organizes droplets by owner for easy filtering
@@ -34,29 +34,29 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 brew install uv
 ```
 
-### Install tobcloud
+### Install dropkit
 
 ```bash
 # Based on what you have configured on your machine, use one or the other, so you do not have to insert any username/password
-uv tool install git+https://github.com/trailofbits/tobcloud.git
-uv tool install git+ssh://git@github.com/trailofbits/tobcloud.git
+uv tool install git+https://github.com/trailofbits/dropkit.git
+uv tool install git+ssh://git@github.com/trailofbits/dropkit.git
 ```
 
-This installs `tobcloud` as a global command-line tool.
+This installs `dropkit` as a global command-line tool.
 
 ## Upgrading
 
 To upgrade to the latest version:
 
 ```bash
-uv tool upgrade tobcloud
+uv tool upgrade dropkit
 ```
 
 Or reinstall from the latest git version:
 
 ```bash
-uv tool uninstall tobcloud
-uv tool install git+https://github.com/trailofbits/tobcloud.git
+uv tool uninstall dropkit
+uv tool install git+https://github.com/trailofbits/dropkit.git
 ```
 
 ## Quick Start
@@ -66,7 +66,7 @@ uv tool install git+https://github.com/trailofbits/tobcloud.git
 Run the initialization wizard:
 
 ```bash
-tobcloud init
+dropkit init
 ```
 
 This will validate your DigitalOcean API token, detect SSH keys, register them with DigitalOcean, and let you choose defaults (type `?` for help to see available options).
@@ -75,16 +75,16 @@ This will validate your DigitalOcean API token, detect SSH keys, register them w
 
 ```bash
 # Interactive mode - prompts for name, region, size, image (type ? for help)
-tobcloud create
+dropkit create
 
 # Or specify the name and use defaults
-tobcloud create my-first-droplet
+dropkit create my-first-droplet
 
 # Assign to a specific project (by name or ID)
-tobcloud create my-droplet --project "My Project"
+dropkit create my-droplet --project "My Project"
 
 # Create without Tailscale VPN
-tobcloud create my-droplet --no-tailscale
+dropkit create my-droplet --no-tailscale
 ```
 
 The tool will:
@@ -99,7 +99,7 @@ The tool will:
 ### 3. Connect via SSH
 
 ```bash
-ssh tobcloud.my-first-droplet
+ssh dropkit.my-first-droplet
 ```
 
 Your user account is already set up with your SSH keys.
@@ -107,12 +107,12 @@ Your user account is already set up with your SSH keys.
 ## Available Commands
 
 ```
-Usage: tobcloud [OPTIONS] COMMAND [ARGS]...
+Usage: dropkit [OPTIONS] COMMAND [ARGS]...
 
 Manage DigitalOcean droplets for ToB engineers
 
 Commands:
-  init             Initialize tobcloud configuration.
+  init             Initialize dropkit configuration.
   create           Create a new DigitalOcean droplet with cloud-init configuration.
   list             List droplets and hibernated snapshots tagged with owner:<username>.
   config-ssh       Configure SSH for an existing droplet.
@@ -125,17 +125,17 @@ Commands:
   hibernate        Hibernate a droplet (snapshot and destroy to save costs).
   wake             Wake a hibernated droplet (restore from snapshot).
   enable-tailscale Enable Tailscale VPN on an existing droplet.
-  list-ssh-keys    List SSH keys registered via tobcloud.
+  list-ssh-keys    List SSH keys registered via dropkit.
   add-ssh-key      Add or import an SSH public key to DigitalOcean.
-  delete-ssh-key   Delete an SSH key registered via tobcloud.
-  version          Show the version of tobcloud.
+  delete-ssh-key   Delete an SSH key registered via dropkit.
+  version          Show the version of dropkit.
 ```
 
-Use `tobcloud <command> --help` for detailed help on any command.
+Use `dropkit <command> --help` for detailed help on any command.
 
 ## Configuration
 
-Configuration files are stored in `~/.config/tobcloud/`:
+Configuration files are stored in `~/.config/dropkit/`:
 
 - **`config.yaml`** - Main configuration (API token, defaults, SSH keys)
 - **`cloud-init.yaml`** - Cloud-init template (customizable)
@@ -151,10 +151,10 @@ All droplets are automatically tagged with:
 
 Organize your droplets into DigitalOcean projects:
 
-- **Set default project** during `tobcloud init` - all new droplets will be assigned to this project
+- **Set default project** during `dropkit init` - all new droplets will be assigned to this project
   - The init wizard will suggest your DigitalOcean default project if you have one
   - Just press Enter to accept it, or type a different project name/ID
-- **Override per-droplet** using `--project <name>` flag with `tobcloud create`
+- **Override per-droplet** using `--project <name>` flag with `dropkit create`
 - Project assignment happens automatically after droplet creation
 - **Tab completion** available for project names when using shell completion
 
@@ -162,9 +162,9 @@ You can specify projects by name (e.g., `--project "My Project"`) or by UUID. Ty
 
 ### SSH Hostname Convention
 
-All SSH config entries use the prefix `tobcloud.<droplet-name>`:
+All SSH config entries use the prefix `dropkit.<droplet-name>`:
 
-- Connect with: `ssh tobcloud.my-droplet`
+- Connect with: `ssh dropkit.my-droplet`
 
 ### Shell Completion
 
@@ -172,25 +172,25 @@ Enable tab completion for droplet names in your shell:
 
 **Zsh (recommended):**
 ```bash
-tobcloud --install-completion zsh
+dropkit --install-completion zsh
 ```
 
 **Bash:**
 ```bash
-tobcloud --install-completion bash
+dropkit --install-completion bash
 ```
 
 After installation, restart your shell or source your configuration file. You can then use tab completion with commands that accept droplet names:
 
 ```bash
-tobcloud info <TAB>             # Shows your droplets
-tobcloud rename <TAB>           # Shows your droplets
-tobcloud destroy <TAB>          # Shows your droplets
-tobcloud resize <TAB>           # Shows your droplets
-tobcloud on <TAB>               # Shows your droplets
-tobcloud off <TAB>              # Shows your droplets
-tobcloud config-ssh <TAB>       # Shows your droplets
-tobcloud enable-tailscale <TAB> # Shows your droplets
+dropkit info <TAB>             # Shows your droplets
+dropkit rename <TAB>           # Shows your droplets
+dropkit destroy <TAB>          # Shows your droplets
+dropkit resize <TAB>           # Shows your droplets
+dropkit on <TAB>               # Shows your droplets
+dropkit off <TAB>              # Shows your droplets
+dropkit config-ssh <TAB>       # Shows your droplets
+dropkit enable-tailscale <TAB> # Shows your droplets
 ```
 
 The completion dynamically fetches your droplets from DigitalOcean, showing only those tagged with your username.
@@ -201,17 +201,17 @@ DigitalOcean charges for stopped droplets at the full hourly rate. To avoid this
 
 ```bash
 # Hibernate: snapshot the droplet and destroy it (stops billing)
-tobcloud hibernate my-droplet
+dropkit hibernate my-droplet
 
 # Wake: restore the droplet from the snapshot
-tobcloud wake my-droplet
+dropkit wake my-droplet
 
 # Delete a hibernated snapshot without restoring
-tobcloud destroy my-droplet
+dropkit destroy my-droplet
 ```
 
 **How it works:**
-1. `hibernate` powers off the droplet, creates a snapshot (`tobcloud-<name>`), then destroys the droplet
+1. `hibernate` powers off the droplet, creates a snapshot (`dropkit-<name>`), then destroys the droplet
 2. `wake` creates a new droplet from the snapshot with the same region and size
 3. Snapshots are tagged with `owner:<username>` and `size:<size-slug>` for tracking
 4. After waking, you're prompted to delete the snapshot (default: yes)
@@ -220,16 +220,16 @@ tobcloud destroy my-droplet
 
 ### Cloud-Init Customization
 
-Edit `~/.config/tobcloud/cloud-init.yaml` to customize user setup, package installation, firewall rules, and shell configuration. The template uses Jinja2 syntax with variables `{{ username }}` and `{{ ssh_keys }}`.
+Edit `~/.config/dropkit/cloud-init.yaml` to customize user setup, package installation, firewall rules, and shell configuration. The template uses Jinja2 syntax with variables `{{ username }}` and `{{ ssh_keys }}`.
 
 ## Troubleshooting
 
-### "Config not found. Run 'tobcloud init' first"
+### "Config not found. Run 'dropkit init' first"
 
 Initialize the configuration:
 
 ```bash
-tobcloud init
+dropkit init
 ```
 
 ### Cloud-init failed or timeout
@@ -237,14 +237,14 @@ tobcloud init
 Check cloud-init status manually:
 
 ```bash
-ssh tobcloud.my-droplet 'sudo cloud-init status'
-ssh tobcloud.my-droplet 'sudo cat /var/log/cloud-init.log'
+ssh dropkit.my-droplet 'sudo cloud-init status'
+ssh dropkit.my-droplet 'sudo cat /var/log/cloud-init.log'
 ```
 
 Use `--verbose` flag to see detailed output:
 
 ```bash
-tobcloud create my-droplet --verbose
+dropkit create my-droplet --verbose
 ```
 
 ### "Droplet not found with tag owner:<username>"
@@ -252,7 +252,7 @@ tobcloud create my-droplet --verbose
 The droplet might belong to someone else. List your droplets:
 
 ```bash
-tobcloud list
+dropkit list
 ```
 
 ## Development
@@ -260,8 +260,8 @@ tobcloud list
 ### Setup Development Environment
 
 ```bash
-git clone https://github.com/trailofbits/tobcloud.git
-cd tobcloud
+git clone https://github.com/trailofbits/dropkit.git
+cd dropkit
 uv sync
 ```
 
@@ -281,7 +281,7 @@ uv run pytest -k "test_*"  # Run specific tests
 prek run              # Run all checks (ruff, ty, shellcheck)
 uv run ruff format .   # Format code
 uv run ruff check .    # Lint code
-uv run ty check tobcloud/   # Type check
+uv run ty check dropkit/   # Type check
 ```
 
 ## Technology Stack
@@ -302,9 +302,9 @@ DigitalOcean uses **custom scopes** to control what actions an API token can per
 - **Full Access** (all permissions) - simpler but less secure
 - **Custom Scopes** (specific permissions) - more secure, recommended
 
-### Required Scopes for tobcloud
+### Required Scopes for dropkit
 
-To use all features of tobcloud, your DigitalOcean API token needs these **23 specific scopes**:
+To use all features of dropkit, your DigitalOcean API token needs these **23 specific scopes**:
 
 #### Account (Full Management)
 - `account:read` - View account details (used to fetch your email for username)
@@ -357,7 +357,7 @@ To use all features of tobcloud, your DigitalOcean API token needs these **23 sp
 
 1. Go to [DigitalOcean API Tokens](https://cloud.digitalocean.com/account/api/tokens)
 2. Click **Generate New Token**
-3. Give it a descriptive name (e.g., "tobcloud-cli")
+3. Give it a descriptive name (e.g., "dropkit-cli")
 4. Select **Custom Scopes**
 5. Check all 23 scopes listed above
 6. Set expiration period (or no expiration)
@@ -367,7 +367,7 @@ To use all features of tobcloud, your DigitalOcean API token needs these **23 sp
 
 1. Go to [DigitalOcean API Tokens](https://cloud.digitalocean.com/account/api/tokens)
 2. Click **Generate New Token**
-3. Give it a descriptive name (e.g., "tobcloud-cli")
+3. Give it a descriptive name (e.g., "dropkit-cli")
 4. Select **Full Access** or **Read and Write**
 5. Set expiration period
 6. Click **Generate Token**
@@ -392,11 +392,11 @@ For more information, see the [DigitalOcean API Token Scopes documentation](http
 
 ## License
 
-[Add your license here]
+Apache 2.0 - see [LICENSE](LICENSE)
 
 ## Support
 
-- **Issues**: [GitHub Issues](https://github.com/trailofbits/tobcloud/issues)
+- **Issues**: [GitHub Issues](https://github.com/trailofbits/dropkit/issues)
 - **Documentation**: See [CLAUDE.md](CLAUDE.md) for detailed development documentation
 
 ## Credits

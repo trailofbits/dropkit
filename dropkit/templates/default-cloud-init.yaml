@@ -91,7 +91,7 @@ runcmd:
   - ufw --force enable
 
   {% if tailscale_enabled %}
-  # Install Tailscale via official script (daemon only, authentication handled by tobcloud)
+  # Install Tailscale via official script (daemon only, authentication handled by dropkit)
   - curl -fsSL https://tailscale.com/install.sh | sh
   {% endif %}
 

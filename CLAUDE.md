@@ -1,4 +1,4 @@
-# tobcloud
+# dropkit
 
 CLI tool for managing DigitalOcean droplets for Trail of Bits engineers.
 Pre-configured cloud-init, Tailscale VPN (enabled by default), and SSH config management.
@@ -16,17 +16,17 @@ uv sync                      # Install dependencies
 prek install                 # Set up pre-commit hooks (one-time)
 prek run                     # Run all checks (ruff, ty, shellcheck, etc.)
 uv run pytest                # Run tests
-uv run tobcloud --help       # CLI help
+uv run dropkit --help        # CLI help
 ```
 
 ## Project Structure
 
 ```
-tobcloud/
+dropkit/
 ├── pyproject.toml              # Dependencies and metadata
 ├── CLAUDE.md                   # This file
 ├── README.md                   # User documentation
-├── tobcloud/
+├── dropkit/
 │   ├── main.py                 # Typer CLI entry point
 │   ├── config.py               # Config with SSH key validation
 │   ├── api.py                  # DigitalOcean REST API (see docstring for endpoints)
@@ -58,7 +58,7 @@ tobcloud/
 - `john.doe@trailofbits.com` → `john_doe`
 
 ### SSH Hostname
-- All SSH entries use `tobcloud.<droplet-name>` format
+- All SSH entries use `dropkit.<droplet-name>` format
 - Centralized in `get_ssh_hostname()` helper
 
 ### Tags
@@ -138,7 +138,7 @@ uv run <command>             # Run in venv
 prek run                     # Run all checks (required before commit)
 prek run --all-files         # Check all files, not just staged
 uv run ruff check --fix .    # Lint + autofix only
-uv run ty check tobcloud/    # Type check only
+uv run ty check dropkit/     # Type check only
 ```
 
 **Ruff config**: Python 3.11+, 100-char lines, modern syntax (`str | None`, `list[str]`).
@@ -153,19 +153,19 @@ uv run pytest -v                           # Verbose
 
 ## Pydantic Models
 
-- **`TobcloudConfig`** — Root config with `extra='forbid'`
+- **`DropkitConfig`** — Root config with `extra='forbid'`
 - **`DigitalOceanConfig`** — API token validation
 - **`DefaultsConfig`** — Region, size, image slugs
 - **`CloudInitConfig`** — Template path, SSH keys (min 1)
 - **`SSHConfig`** — SSH config path, identity file
 - **`TailscaleConfig`** — VPN settings (enabled, lock_down_firewall, auth_timeout)
 
-Config files: `~/.config/tobcloud/config.yaml`, `~/.config/tobcloud/cloud-init.yaml`
+Config files: `~/.config/dropkit/config.yaml`, `~/.config/dropkit/cloud-init.yaml`
 
 ## Shell Completion
 
 ```bash
-tobcloud --install-completion zsh  # Enable tab completion
+dropkit --install-completion zsh  # Enable tab completion
 ```
 
 Provides dynamic completion for droplet names (filtered by owner tag).

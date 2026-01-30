@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 from typer.testing import CliRunner
 
-from tobcloud.main import app
+from dropkit.main import app
 
 runner = CliRunner()
 
@@ -40,12 +40,12 @@ def create_mock_config():
 class TestRenameCommand:
     """Tests for the rename command."""
 
-    @patch("tobcloud.main.add_ssh_host")
-    @patch("tobcloud.main.remove_ssh_host")
-    @patch("tobcloud.main.host_exists")
-    @patch("tobcloud.main.Prompt.ask")
-    @patch("tobcloud.main.find_user_droplet")
-    @patch("tobcloud.main.load_config_and_api")
+    @patch("dropkit.main.add_ssh_host")
+    @patch("dropkit.main.remove_ssh_host")
+    @patch("dropkit.main.host_exists")
+    @patch("dropkit.main.Prompt.ask")
+    @patch("dropkit.main.find_user_droplet")
+    @patch("dropkit.main.load_config_and_api")
     def test_successful_rename(
         self,
         mock_load_config,
@@ -84,8 +84,8 @@ class TestRenameCommand:
         mock_remove_ssh.assert_called_once()
         mock_add_ssh.assert_called_once()
 
-    @patch("tobcloud.main.find_user_droplet")
-    @patch("tobcloud.main.load_config_and_api")
+    @patch("dropkit.main.find_user_droplet")
+    @patch("dropkit.main.load_config_and_api")
     def test_rename_same_name_exits_early(self, mock_load_config, mock_find_droplet):
         """Test that renaming to the same name exits early."""
         mock_api = MagicMock()
@@ -102,8 +102,8 @@ class TestRenameCommand:
         assert "same as current name" in result.output.lower()
         mock_api.rename_droplet.assert_not_called()
 
-    @patch("tobcloud.main.find_user_droplet")
-    @patch("tobcloud.main.load_config_and_api")
+    @patch("dropkit.main.find_user_droplet")
+    @patch("dropkit.main.load_config_and_api")
     def test_rename_droplet_not_found(self, mock_load_config, mock_find_droplet):
         """Test rename when droplet is not found."""
         mock_api = MagicMock()
@@ -119,8 +119,8 @@ class TestRenameCommand:
         assert "not found" in result.output.lower()
         mock_api.rename_droplet.assert_not_called()
 
-    @patch("tobcloud.main.find_user_droplet")
-    @patch("tobcloud.main.load_config_and_api")
+    @patch("dropkit.main.find_user_droplet")
+    @patch("dropkit.main.load_config_and_api")
     def test_rename_name_conflict(self, mock_load_config, mock_find_droplet):
         """Test rename fails when new name already exists for the same user."""
         mock_api = MagicMock()
@@ -141,8 +141,8 @@ class TestRenameCommand:
         assert "already exists" in result.output.lower()
         mock_api.rename_droplet.assert_not_called()
 
-    @patch("tobcloud.main.find_user_droplet")
-    @patch("tobcloud.main.load_config_and_api")
+    @patch("dropkit.main.find_user_droplet")
+    @patch("dropkit.main.load_config_and_api")
     def test_rename_droplet_not_active(self, mock_load_config, mock_find_droplet):
         """Test rename fails when droplet is not active (powered off)."""
         mock_api = MagicMock()
@@ -160,11 +160,11 @@ class TestRenameCommand:
 
         assert result.exit_code == 1
         assert "off" in result.output.lower()
-        assert "tobcloud on" in result.output.lower()
+        assert "dropkit on" in result.output.lower()
         mock_api.rename_droplet.assert_not_called()
 
-    @patch("tobcloud.main.find_user_droplet")
-    @patch("tobcloud.main.load_config_and_api")
+    @patch("dropkit.main.find_user_droplet")
+    @patch("dropkit.main.load_config_and_api")
     def test_rename_droplet_status_new(self, mock_load_config, mock_find_droplet):
         """Test rename fails when droplet status is 'new' (still initializing)."""
         mock_api = MagicMock()
@@ -183,9 +183,9 @@ class TestRenameCommand:
         assert "new" in result.output.lower()
         mock_api.rename_droplet.assert_not_called()
 
-    @patch("tobcloud.main.Prompt.ask")
-    @patch("tobcloud.main.find_user_droplet")
-    @patch("tobcloud.main.load_config_and_api")
+    @patch("dropkit.main.Prompt.ask")
+    @patch("dropkit.main.find_user_droplet")
+    @patch("dropkit.main.load_config_and_api")
     def test_rename_user_cancels(self, mock_load_config, mock_find_droplet, mock_prompt):
         """Test rename cancelled when user says no."""
         mock_api = MagicMock()
@@ -207,10 +207,10 @@ class TestRenameCommand:
         assert "cancelled" in result.output.lower()
         mock_api.rename_droplet.assert_not_called()
 
-    @patch("tobcloud.main.host_exists")
-    @patch("tobcloud.main.Prompt.ask")
-    @patch("tobcloud.main.find_user_droplet")
-    @patch("tobcloud.main.load_config_and_api")
+    @patch("dropkit.main.host_exists")
+    @patch("dropkit.main.Prompt.ask")
+    @patch("dropkit.main.find_user_droplet")
+    @patch("dropkit.main.load_config_and_api")
     def test_rename_no_ssh_config_entry(
         self, mock_load_config, mock_find_droplet, mock_prompt, mock_host_exists
     ):
@@ -237,8 +237,8 @@ class TestRenameCommand:
         assert "successfully renamed" in result.output.lower()
         assert "not found" in result.output.lower()  # SSH config not found message
 
-    @patch("tobcloud.main.find_user_droplet")
-    @patch("tobcloud.main.load_config_and_api")
+    @patch("dropkit.main.find_user_droplet")
+    @patch("dropkit.main.load_config_and_api")
     def test_rename_only_checks_user_droplets(self, mock_load_config, mock_find_droplet):
         """Test that name conflict check only considers user's own droplets."""
         mock_api = MagicMock()
@@ -267,8 +267,8 @@ class TestRenameCommand:
 class TestRenameEdgeCases:
     """Edge case tests for rename command."""
 
-    @patch("tobcloud.main.find_user_droplet")
-    @patch("tobcloud.main.load_config_and_api")
+    @patch("dropkit.main.find_user_droplet")
+    @patch("dropkit.main.load_config_and_api")
     def test_rename_droplet_missing_id(self, mock_load_config, mock_find_droplet):
         """Test rename when droplet has no ID."""
         mock_api = MagicMock()
@@ -285,12 +285,12 @@ class TestRenameEdgeCases:
         assert result.exit_code == 1
         assert "could not determine droplet id" in result.output.lower()
 
-    @patch("tobcloud.main.add_ssh_host")
-    @patch("tobcloud.main.remove_ssh_host")
-    @patch("tobcloud.main.host_exists")
-    @patch("tobcloud.main.Prompt.ask")
-    @patch("tobcloud.main.find_user_droplet")
-    @patch("tobcloud.main.load_config_and_api")
+    @patch("dropkit.main.add_ssh_host")
+    @patch("dropkit.main.remove_ssh_host")
+    @patch("dropkit.main.host_exists")
+    @patch("dropkit.main.Prompt.ask")
+    @patch("dropkit.main.find_user_droplet")
+    @patch("dropkit.main.load_config_and_api")
     def test_rename_ssh_update_failure_continues(
         self,
         mock_load_config,
@@ -325,8 +325,8 @@ class TestRenameEdgeCases:
         assert "successfully renamed" in result.output.lower()
         assert "could not update ssh config" in result.output.lower()
 
-    @patch("tobcloud.main.find_user_droplet")
-    @patch("tobcloud.main.load_config_and_api")
+    @patch("dropkit.main.find_user_droplet")
+    @patch("dropkit.main.load_config_and_api")
     def test_rename_multiple_droplets_same_user(self, mock_load_config, mock_find_droplet):
         """Test name conflict when user has multiple droplets."""
         mock_api = MagicMock()

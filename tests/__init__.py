@@ -1,1 +1,1 @@
-"""Tests for tobcloud."""
+"""Tests for dropkit."""

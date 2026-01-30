@@ -4,7 +4,7 @@ from pathlib import Path
 
 from jinja2 import Template
 
-from tobcloud.config import Config
+from dropkit.config import Config
 
 
 def render_cloud_init(

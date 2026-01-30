@@ -1,4 +1,4 @@
-"""UI utilities for tobcloud - display functions and prompts."""
+"""UI utilities for dropkit - display functions and prompts."""
 
 from collections.abc import Callable
 from typing import Any

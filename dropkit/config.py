@@ -1,4 +1,4 @@
-"""Configuration management for tobcloud."""
+"""Configuration management for dropkit."""
 
 import base64
 import hashlib
@@ -89,8 +89,8 @@ class TailscaleConfig(BaseModel):
     )
 
 
-class TobcloudConfig(BaseModel):
-    """Main tobcloud configuration."""
+class DropkitConfig(BaseModel):
+    """Main dropkit configuration."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -102,18 +102,18 @@ class TobcloudConfig(BaseModel):
 
 
 class Config:
-    """Manages tobcloud configuration with Pydantic validation."""
+    """Manages dropkit configuration with Pydantic validation."""
 
-    CONFIG_DIR = Path.home() / ".config" / "tobcloud"
+    CONFIG_DIR = Path.home() / ".config" / "dropkit"
     CONFIG_FILE = CONFIG_DIR / "config.yaml"
     CLOUD_INIT_FILE = CONFIG_DIR / "cloud-init.yaml"
 
     def __init__(self):
         """Initialize config manager."""
-        self._config: TobcloudConfig | None = None
+        self._config: DropkitConfig | None = None
 
     @property
-    def config(self) -> TobcloudConfig:
+    def config(self) -> DropkitConfig:
         """Get the validated configuration."""
         if self._config is None:
             raise ValueError("Configuration not loaded. Call load() first.")
@@ -145,14 +145,14 @@ class Config:
         """Load and validate configuration from file."""
         if not self.CONFIG_FILE.exists():
             raise FileNotFoundError(
-                f"Config file not found at {self.CONFIG_FILE}. Run 'tobcloud init' first."
+                f"Config file not found at {self.CONFIG_FILE}. Run 'dropkit init' first."
             )
 
         with open(self.CONFIG_FILE) as f:
             data = yaml.safe_load(f) or {}
 
         # Validate with Pydantic
-        self._config = TobcloudConfig(**data)
+        self._config = DropkitConfig(**data)
 
     def save(self) -> None:
         """Save configuration to file."""
@@ -323,7 +323,7 @@ class Config:
             extra_tags = []
 
         # Create validated Pydantic model
-        self._config = TobcloudConfig(
+        self._config = DropkitConfig(
             digitalocean=DigitalOceanConfig(
                 token=token,
                 api_base="https://api.digitalocean.com/v2",

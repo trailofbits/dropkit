@@ -5,8 +5,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from tobcloud.config import TailscaleConfig
-from tobcloud.main import (
+from dropkit.config import TailscaleConfig
+from dropkit.main import (
     check_local_tailscale,
     check_tailscale_installed,
     install_tailscale_on_droplet,
@@ -85,7 +85,7 @@ class TestIsTailscaleIP:
 class TestCheckLocalTailscale:
     """Tests for check_local_tailscale function."""
 
-    @patch("tobcloud.main.subprocess.run")
+    @patch("dropkit.main.subprocess.run")
     def test_tailscale_running(self, mock_run):
         """Test when Tailscale is running locally."""
         mock_run.return_value = MagicMock(
@@ -94,7 +94,7 @@ class TestCheckLocalTailscale:
         )
         assert check_local_tailscale() is True
 
-    @patch("tobcloud.main.subprocess.run")
+    @patch("dropkit.main.subprocess.run")
     def test_tailscale_not_running(self, mock_run):
         """Test when Tailscale is installed but not running."""
         mock_run.return_value = MagicMock(
@@ -103,19 +103,19 @@ class TestCheckLocalTailscale:
         )
         assert check_local_tailscale() is False
 
-    @patch("tobcloud.main.subprocess.run")
+    @patch("dropkit.main.subprocess.run")
     def test_tailscale_command_fails(self, mock_run):
         """Test when tailscale command returns non-zero."""
         mock_run.return_value = MagicMock(returncode=1)
         assert check_local_tailscale() is False
 
-    @patch("tobcloud.main.subprocess.run")
+    @patch("dropkit.main.subprocess.run")
     def test_tailscale_not_installed(self, mock_run):
         """Test when tailscale is not installed."""
         mock_run.side_effect = FileNotFoundError()
         assert check_local_tailscale() is False
 
-    @patch("tobcloud.main.subprocess.run")
+    @patch("dropkit.main.subprocess.run")
     def test_tailscale_timeout(self, mock_run):
         """Test when tailscale command times out."""
         import subprocess
@@ -123,7 +123,7 @@ class TestCheckLocalTailscale:
         mock_run.side_effect = subprocess.TimeoutExpired("tailscale", 5)
         assert check_local_tailscale() is False
 
-    @patch("tobcloud.main.subprocess.run")
+    @patch("dropkit.main.subprocess.run")
     def test_invalid_json_response(self, mock_run):
         """Test when tailscale returns invalid JSON."""
         mock_run.return_value = MagicMock(
@@ -136,78 +136,78 @@ class TestCheckLocalTailscale:
 class TestRunTailscaleUp:
     """Tests for run_tailscale_up function."""
 
-    @patch("tobcloud.main.subprocess.run")
+    @patch("dropkit.main.subprocess.run")
     def test_extracts_auth_url(self, mock_run):
         """Test that auth URL is extracted from output."""
         mock_run.return_value = MagicMock(
             returncode=0,
             stdout=b"To authenticate, visit:\n\n\thttps://login.tailscale.com/a/abc123\n",
         )
-        url = run_tailscale_up("tobcloud.test")
+        url = run_tailscale_up("dropkit.test")
         assert url == "https://login.tailscale.com/a/abc123"
 
-    @patch("tobcloud.main.subprocess.run")
+    @patch("dropkit.main.subprocess.run")
     def test_strips_trailing_punctuation(self, mock_run):
         """Test that trailing punctuation is stripped from URL."""
         mock_run.return_value = MagicMock(
             returncode=0,
             stdout=b"Visit: https://login.tailscale.com/a/abc123.\n",
         )
-        url = run_tailscale_up("tobcloud.test")
+        url = run_tailscale_up("dropkit.test")
         assert url == "https://login.tailscale.com/a/abc123"
 
-    @patch("tobcloud.main.subprocess.run")
+    @patch("dropkit.main.subprocess.run")
     def test_no_url_in_output(self, mock_run):
         """Test when no URL is found in output."""
         mock_run.return_value = MagicMock(
             returncode=0,
             stdout=b"Some other output without URL",
         )
-        url = run_tailscale_up("tobcloud.test")
+        url = run_tailscale_up("dropkit.test")
         assert url is None
 
-    @patch("tobcloud.main.subprocess.run")
+    @patch("dropkit.main.subprocess.run")
     def test_non_tailscale_url_ignored(self, mock_run):
         """Test that non-tailscale URLs are ignored."""
         mock_run.return_value = MagicMock(
             returncode=0,
             stdout=b"Visit https://example.com/login for more info",
         )
-        url = run_tailscale_up("tobcloud.test")
+        url = run_tailscale_up("dropkit.test")
         assert url is None
 
-    @patch("tobcloud.main.subprocess.run")
+    @patch("dropkit.main.subprocess.run")
     def test_ssh_timeout(self, mock_run):
         """Test when SSH connection times out."""
         import subprocess
 
         mock_run.side_effect = subprocess.TimeoutExpired("ssh", 30)
-        url = run_tailscale_up("tobcloud.test")
+        url = run_tailscale_up("dropkit.test")
         assert url is None
 
 
 class TestLockDownToTailscale:
     """Tests for lock_down_to_tailscale function."""
 
-    @patch("tobcloud.main.subprocess.run")
+    @patch("dropkit.main.subprocess.run")
     def test_all_commands_succeed(self, mock_run):
         """Test when all UFW commands succeed."""
         mock_run.return_value = MagicMock(returncode=0, stderr=b"")
-        result = lock_down_to_tailscale("tobcloud.test")
+        result = lock_down_to_tailscale("dropkit.test")
         assert result is True
         # Should have called 5 commands
         assert mock_run.call_count == 5
 
-    @patch("tobcloud.main.subprocess.run")
+    @patch("dropkit.main.subprocess.run")
     def test_first_command_fails(self, mock_run):
         """Test when first UFW command fails."""
         mock_run.return_value = MagicMock(returncode=1, stderr=b"ufw error")
-        result = lock_down_to_tailscale("tobcloud.test")
+        result = lock_down_to_tailscale("dropkit.test")
         assert result is False
         # Should stop after first failure
         assert mock_run.call_count == 1
 
-    @patch("tobcloud.main.subprocess.run")
+    @patch("dropkit.main.subprocess.run")
     def test_middle_command_fails(self, mock_run):
         """Test when a middle command fails."""
         # First two succeed, third fails
@@ -216,38 +216,38 @@ class TestLockDownToTailscale:
             MagicMock(returncode=0, stderr=b""),
             MagicMock(returncode=1, stderr=b"deny error"),
         ]
-        result = lock_down_to_tailscale("tobcloud.test")
+        result = lock_down_to_tailscale("dropkit.test")
         assert result is False
         assert mock_run.call_count == 3
 
-    @patch("tobcloud.main.subprocess.run")
+    @patch("dropkit.main.subprocess.run")
     def test_ssh_timeout(self, mock_run):
         """Test when SSH connection times out."""
         import subprocess
 
         mock_run.side_effect = subprocess.TimeoutExpired("ssh", 30)
-        result = lock_down_to_tailscale("tobcloud.test")
+        result = lock_down_to_tailscale("dropkit.test")
         assert result is False
 
 
 class TestVerifyTailscaleSsh:
     """Tests for verify_tailscale_ssh function."""
 
-    @patch("tobcloud.main.subprocess.run")
+    @patch("dropkit.main.subprocess.run")
     def test_ssh_success(self, mock_run):
         """Test when SSH via Tailscale works."""
         mock_run.return_value = MagicMock(returncode=0)
         result = verify_tailscale_ssh("100.64.1.1", "testuser", "~/.ssh/id_ed25519")
         assert result is True
 
-    @patch("tobcloud.main.subprocess.run")
+    @patch("dropkit.main.subprocess.run")
     def test_ssh_failure(self, mock_run):
         """Test when SSH via Tailscale fails."""
         mock_run.return_value = MagicMock(returncode=255)
         result = verify_tailscale_ssh("100.64.1.1", "testuser", "~/.ssh/id_ed25519")
         assert result is False
 
-    @patch("tobcloud.main.subprocess.run")
+    @patch("dropkit.main.subprocess.run")
     def test_ssh_timeout(self, mock_run):
         """Test when SSH times out."""
         import subprocess
@@ -288,75 +288,75 @@ class TestTailscaleConfig:
 class TestCheckTailscaleInstalled:
     """Tests for check_tailscale_installed function."""
 
-    @patch("tobcloud.main.subprocess.run")
+    @patch("dropkit.main.subprocess.run")
     def test_tailscale_installed(self, mock_run):
         """Test when Tailscale is installed."""
         mock_run.return_value = MagicMock(returncode=0)
-        assert check_tailscale_installed("tobcloud.test") is True
+        assert check_tailscale_installed("dropkit.test") is True
 
-    @patch("tobcloud.main.subprocess.run")
+    @patch("dropkit.main.subprocess.run")
     def test_tailscale_not_installed(self, mock_run):
         """Test when Tailscale is not installed."""
         mock_run.return_value = MagicMock(returncode=1)
-        assert check_tailscale_installed("tobcloud.test") is False
+        assert check_tailscale_installed("dropkit.test") is False
 
-    @patch("tobcloud.main.subprocess.run")
+    @patch("dropkit.main.subprocess.run")
     def test_ssh_timeout(self, mock_run):
         """Test when SSH connection times out."""
         import subprocess
 
         mock_run.side_effect = subprocess.TimeoutExpired("ssh", 15)
-        assert check_tailscale_installed("tobcloud.test") is False
+        assert check_tailscale_installed("dropkit.test") is False
 
-    @patch("tobcloud.main.subprocess.run")
+    @patch("dropkit.main.subprocess.run")
     def test_ssh_connection_failed(self, mock_run):
         """Test when SSH connection fails."""
         import subprocess
 
         mock_run.side_effect = subprocess.SubprocessError("Connection refused")
-        assert check_tailscale_installed("tobcloud.test") is False
+        assert check_tailscale_installed("dropkit.test") is False
 
 
 class TestInstallTailscaleOnDroplet:
     """Tests for install_tailscale_on_droplet function."""
 
-    @patch("tobcloud.main.subprocess.run")
+    @patch("dropkit.main.subprocess.run")
     def test_install_success(self, mock_run):
         """Test successful Tailscale installation."""
         mock_run.return_value = MagicMock(
             returncode=0,
             stdout=b"Installation complete!",
         )
-        assert install_tailscale_on_droplet("tobcloud.test") is True
+        assert install_tailscale_on_droplet("dropkit.test") is True
 
-    @patch("tobcloud.main.subprocess.run")
+    @patch("dropkit.main.subprocess.run")
     def test_install_failure(self, mock_run):
         """Test failed Tailscale installation."""
         mock_run.return_value = MagicMock(
             returncode=1,
             stdout=b"Error: curl failed",
         )
-        assert install_tailscale_on_droplet("tobcloud.test") is False
+        assert install_tailscale_on_droplet("dropkit.test") is False
 
-    @patch("tobcloud.main.subprocess.run")
+    @patch("dropkit.main.subprocess.run")
     def test_install_timeout(self, mock_run):
         """Test when installation times out."""
         import subprocess
 
         mock_run.side_effect = subprocess.TimeoutExpired("ssh", 120)
-        assert install_tailscale_on_droplet("tobcloud.test") is False
+        assert install_tailscale_on_droplet("dropkit.test") is False
 
-    @patch("tobcloud.main.subprocess.run")
+    @patch("dropkit.main.subprocess.run")
     def test_ssh_connection_failed(self, mock_run):
         """Test when SSH connection fails during install."""
         import subprocess
 
         mock_run.side_effect = subprocess.SubprocessError("Connection refused")
-        assert install_tailscale_on_droplet("tobcloud.test") is False
+        assert install_tailscale_on_droplet("dropkit.test") is False
 
 
 def create_mock_config(lock_down_firewall: bool = True, auth_timeout: int = 300) -> MagicMock:
-    """Create a mock TobcloudConfig for testing."""
+    """Create a mock DropkitConfig for testing."""
     config = MagicMock()
     config.tailscale = MagicMock()
     config.tailscale.lock_down_firewall = lock_down_firewall
@@ -370,12 +370,12 @@ def create_mock_config(lock_down_firewall: bool = True, auth_timeout: int = 300)
 class TestSetupTailscale:
     """Tests for setup_tailscale function."""
 
-    @patch("tobcloud.main.verify_tailscale_ssh")
-    @patch("tobcloud.main.lock_down_to_tailscale")
-    @patch("tobcloud.main.check_local_tailscale")
-    @patch("tobcloud.main.add_ssh_host")
-    @patch("tobcloud.main.wait_for_tailscale_ip")
-    @patch("tobcloud.main.run_tailscale_up")
+    @patch("dropkit.main.verify_tailscale_ssh")
+    @patch("dropkit.main.lock_down_to_tailscale")
+    @patch("dropkit.main.check_local_tailscale")
+    @patch("dropkit.main.add_ssh_host")
+    @patch("dropkit.main.wait_for_tailscale_ip")
+    @patch("dropkit.main.run_tailscale_up")
     def test_already_authenticated_succeeds(
         self,
         mock_tailscale_up,
@@ -395,18 +395,18 @@ class TestSetupTailscale:
         mock_verify.return_value = True
 
         config = create_mock_config()
-        result = setup_tailscale("tobcloud.test", "testuser", config)
+        result = setup_tailscale("dropkit.test", "testuser", config)
 
         assert result == "100.64.1.1"
         # Should have called wait_for_tailscale_ip with short timeout
         mock_wait_ip.assert_called_once_with(
-            "tobcloud.test", timeout=10, poll_interval=2, verbose=False
+            "dropkit.test", timeout=10, poll_interval=2, verbose=False
         )
         mock_add_ssh.assert_called_once()
         mock_lockdown.assert_called_once()
 
-    @patch("tobcloud.main.wait_for_tailscale_ip")
-    @patch("tobcloud.main.run_tailscale_up")
+    @patch("dropkit.main.wait_for_tailscale_ip")
+    @patch("dropkit.main.run_tailscale_up")
     def test_no_auth_url_and_not_connected_fails(
         self,
         mock_tailscale_up,
@@ -419,16 +419,16 @@ class TestSetupTailscale:
         mock_wait_ip.return_value = None
 
         config = create_mock_config()
-        result = setup_tailscale("tobcloud.test", "testuser", config)
+        result = setup_tailscale("dropkit.test", "testuser", config)
 
         assert result is None
 
-    @patch("tobcloud.main.verify_tailscale_ssh")
-    @patch("tobcloud.main.lock_down_to_tailscale")
-    @patch("tobcloud.main.check_local_tailscale")
-    @patch("tobcloud.main.add_ssh_host")
-    @patch("tobcloud.main.wait_for_tailscale_ip")
-    @patch("tobcloud.main.run_tailscale_up")
+    @patch("dropkit.main.verify_tailscale_ssh")
+    @patch("dropkit.main.lock_down_to_tailscale")
+    @patch("dropkit.main.check_local_tailscale")
+    @patch("dropkit.main.add_ssh_host")
+    @patch("dropkit.main.wait_for_tailscale_ip")
+    @patch("dropkit.main.run_tailscale_up")
     def test_normal_auth_flow_succeeds(
         self,
         mock_tailscale_up,
@@ -448,14 +448,14 @@ class TestSetupTailscale:
         mock_verify.return_value = True
 
         config = create_mock_config()
-        result = setup_tailscale("tobcloud.test", "testuser", config)
+        result = setup_tailscale("dropkit.test", "testuser", config)
 
         assert result == "100.64.1.1"
         # Should have called wait_for_tailscale_ip with full auth_timeout
-        mock_wait_ip.assert_called_once_with("tobcloud.test", timeout=300, verbose=False)
+        mock_wait_ip.assert_called_once_with("dropkit.test", timeout=300, verbose=False)
 
-    @patch("tobcloud.main.wait_for_tailscale_ip")
-    @patch("tobcloud.main.run_tailscale_up")
+    @patch("dropkit.main.wait_for_tailscale_ip")
+    @patch("dropkit.main.run_tailscale_up")
     def test_auth_timeout_fails(
         self,
         mock_tailscale_up,
@@ -468,14 +468,14 @@ class TestSetupTailscale:
         mock_wait_ip.return_value = None
 
         config = create_mock_config()
-        result = setup_tailscale("tobcloud.test", "testuser", config)
+        result = setup_tailscale("dropkit.test", "testuser", config)
 
         assert result is None
 
-    @patch("tobcloud.main.check_local_tailscale")
-    @patch("tobcloud.main.add_ssh_host")
-    @patch("tobcloud.main.wait_for_tailscale_ip")
-    @patch("tobcloud.main.run_tailscale_up")
+    @patch("dropkit.main.check_local_tailscale")
+    @patch("dropkit.main.add_ssh_host")
+    @patch("dropkit.main.wait_for_tailscale_ip")
+    @patch("dropkit.main.run_tailscale_up")
     def test_skips_lockdown_when_disabled(
         self,
         mock_tailscale_up,
@@ -488,7 +488,7 @@ class TestSetupTailscale:
         mock_wait_ip.return_value = "100.64.1.1"
 
         config = create_mock_config(lock_down_firewall=False)
-        result = setup_tailscale("tobcloud.test", "testuser", config)
+        result = setup_tailscale("dropkit.test", "testuser", config)
 
         assert result == "100.64.1.1"
         mock_check_local.assert_not_called()  # Lockdown logic not entered
@@ -497,40 +497,40 @@ class TestSetupTailscale:
 class TestTailscaleLogout:
     """Tests for tailscale_logout function."""
 
-    @patch("tobcloud.main.subprocess.run")
+    @patch("dropkit.main.subprocess.run")
     def test_logout_success(self, mock_run):
         """Test successful Tailscale logout."""
         mock_run.return_value = MagicMock(returncode=0, stderr=b"")
-        result = tailscale_logout("tobcloud.test")
+        result = tailscale_logout("dropkit.test")
         assert result is True
         # Verify correct SSH command was called
         mock_run.assert_called_once()
         call_args = mock_run.call_args[0][0]
         assert "ssh" in call_args
-        assert "tobcloud.test" in call_args
+        assert "dropkit.test" in call_args
         assert "sudo tailscale logout" in call_args
 
-    @patch("tobcloud.main.subprocess.run")
+    @patch("dropkit.main.subprocess.run")
     def test_logout_command_fails(self, mock_run):
         """Test when tailscale logout command fails."""
         mock_run.return_value = MagicMock(returncode=1, stderr=b"logout failed")
-        result = tailscale_logout("tobcloud.test")
+        result = tailscale_logout("dropkit.test")
         assert result is False
 
-    @patch("tobcloud.main.subprocess.run")
+    @patch("dropkit.main.subprocess.run")
     def test_ssh_connection_fails(self, mock_run):
         """Test when SSH connection fails."""
         import subprocess
 
         mock_run.side_effect = subprocess.SubprocessError("Connection refused")
-        result = tailscale_logout("tobcloud.test")
+        result = tailscale_logout("dropkit.test")
         assert result is False
 
-    @patch("tobcloud.main.subprocess.run")
+    @patch("dropkit.main.subprocess.run")
     def test_ssh_timeout(self, mock_run):
         """Test when SSH connection times out."""
         import subprocess
 
         mock_run.side_effect = subprocess.TimeoutExpired("ssh", 30)
-        result = tailscale_logout("tobcloud.test")
+        result = tailscale_logout("dropkit.test")
         assert result is False

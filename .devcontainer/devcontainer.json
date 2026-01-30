@@ -1,10 +1,10 @@
 {
   "$schema": "https://raw.githubusercontent.com/devcontainers/spec/main/schemas/devContainer.schema.json",
-  "name": "tobcloud",
+  "name": "dropkit",
   "build": {
     "dockerfile": "Dockerfile"
   },
-  "runArgs": ["--hostname=tobcloud-dev"],
+  "runArgs": ["--hostname=dropkit-dev"],
   "features": {
     "ghcr.io/devcontainers/features/python:1": {
       "version": "3.13"
@@ -16,11 +16,11 @@
   "workspaceFolder": "/workspace",
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
   "mounts": [
-    "source=tobcloud-zsh-history,target=/home/vscode/.zsh_history_data,type=volume",
-    "source=tobcloud-claude,target=/home/vscode/.claude_data,type=volume",
-    "source=tobcloud-gh,target=/home/vscode/.gh_data,type=volume",
-    "source=tobcloud-config,target=/home/vscode/.config/tobcloud,type=volume",
-    "source=tobcloud-ssh,target=/home/vscode/.ssh,type=volume"
+    "source=dropkit-zsh-history,target=/home/vscode/.zsh_history_data,type=volume",
+    "source=dropkit-claude,target=/home/vscode/.claude_data,type=volume",
+    "source=dropkit-gh,target=/home/vscode/.gh_data,type=volume",
+    "source=dropkit-config,target=/home/vscode/.config/dropkit,type=volume",
+    "source=dropkit-ssh,target=/home/vscode/.ssh,type=volume"
   ],
   "customizations": {
     "vscode": {
@@ -49,7 +49,7 @@
   },
   "onCreateCommand": "uv sync",
   "updateContentCommand": "uv sync",
-  "postCreateCommand": "sudo chown -R vscode:vscode /home/vscode/.config/tobcloud /home/vscode/.claude_data /home/vscode/.gh_data /home/vscode/.zsh_history_data /home/vscode/.ssh",
+  "postCreateCommand": "sudo chown -R vscode:vscode /home/vscode/.config/dropkit /home/vscode/.claude_data /home/vscode/.gh_data /home/vscode/.zsh_history_data /home/vscode/.ssh",
   "containerEnv": {
     "UV_LINK_MODE": "copy",
     "CLAUDE_CONFIG_DIR": "/home/vscode/.claude_data",

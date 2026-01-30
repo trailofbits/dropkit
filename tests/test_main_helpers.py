@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from tobcloud.main import (
+from dropkit.main import (
     add_temporary_ssh_rule,
     build_droplet_tags,
     find_snapshot_action,
@@ -23,39 +23,39 @@ class TestGetSnapshotName:
 
     def test_simple_name(self):
         """Test snapshot name for simple droplet name."""
-        assert get_snapshot_name("myvm") == "tobcloud-myvm"
+        assert get_snapshot_name("myvm") == "dropkit-myvm"
 
     def test_name_with_hyphen(self):
         """Test snapshot name for droplet name with hyphen."""
-        assert get_snapshot_name("my-droplet") == "tobcloud-my-droplet"
+        assert get_snapshot_name("my-droplet") == "dropkit-my-droplet"
 
     def test_name_with_numbers(self):
         """Test snapshot name for droplet name with numbers."""
-        assert get_snapshot_name("test123") == "tobcloud-test123"
+        assert get_snapshot_name("test123") == "dropkit-test123"
 
     def test_empty_name(self):
         """Test snapshot name for empty droplet name."""
-        assert get_snapshot_name("") == "tobcloud-"
+        assert get_snapshot_name("") == "dropkit-"
 
 
 class TestGetDropletNameFromSnapshot:
     """Tests for get_droplet_name_from_snapshot function."""
 
-    def test_valid_tobcloud_snapshot(self):
-        """Test extracting droplet name from valid tobcloud snapshot."""
-        assert get_droplet_name_from_snapshot("tobcloud-myvm") == "myvm"
+    def test_valid_dropkit_snapshot(self):
+        """Test extracting droplet name from valid dropkit snapshot."""
+        assert get_droplet_name_from_snapshot("dropkit-myvm") == "myvm"
 
     def test_snapshot_with_hyphen_in_name(self):
         """Test extracting droplet name with hyphens."""
-        assert get_droplet_name_from_snapshot("tobcloud-my-droplet") == "my-droplet"
+        assert get_droplet_name_from_snapshot("dropkit-my-droplet") == "my-droplet"
 
-    def test_non_tobcloud_snapshot(self):
-        """Test with non-tobcloud snapshot name."""
+    def test_non_dropkit_snapshot(self):
+        """Test with non-dropkit snapshot name."""
         assert get_droplet_name_from_snapshot("other-snapshot") is None
 
     def test_partial_prefix(self):
         """Test with partial prefix (should not match)."""
-        assert get_droplet_name_from_snapshot("tobcloud") is None
+        assert get_droplet_name_from_snapshot("dropkit") is None
 
     def test_different_prefix(self):
         """Test with different prefix."""
@@ -63,7 +63,7 @@ class TestGetDropletNameFromSnapshot:
 
     def test_empty_after_prefix(self):
         """Test snapshot name that is just the prefix."""
-        assert get_droplet_name_from_snapshot("tobcloud-") == ""
+        assert get_droplet_name_from_snapshot("dropkit-") == ""
 
 
 class TestGetSshHostname:
@@ -71,11 +71,11 @@ class TestGetSshHostname:
 
     def test_simple_name(self):
         """Test SSH hostname for simple droplet name."""
-        assert get_ssh_hostname("myvm") == "tobcloud.myvm"
+        assert get_ssh_hostname("myvm") == "dropkit.myvm"
 
     def test_name_with_hyphen(self):
         """Test SSH hostname for droplet name with hyphen."""
-        assert get_ssh_hostname("my-droplet") == "tobcloud.my-droplet"
+        assert get_ssh_hostname("my-droplet") == "dropkit.my-droplet"
 
 
 class TestGetUserTag:
@@ -188,7 +188,7 @@ class TestIsDropletTailscaleLocked:
     def test_tailscale_ip_returns_true(self, temp_ssh_config):
         """Test returns True when SSH config has Tailscale IP."""
         # Create SSH config with Tailscale IP
-        Path(temp_ssh_config).write_text("""Host tobcloud.myvm
+        Path(temp_ssh_config).write_text("""Host dropkit.myvm
     HostName 100.80.123.45
     User ubuntu
 """)
@@ -202,7 +202,7 @@ class TestIsDropletTailscaleLocked:
     def test_public_ip_returns_false(self, temp_ssh_config):
         """Test returns False when SSH config has public IP."""
         # Create SSH config with public IP
-        Path(temp_ssh_config).write_text("""Host tobcloud.myvm
+        Path(temp_ssh_config).write_text("""Host dropkit.myvm
     HostName 192.168.1.100
     User ubuntu
 """)
@@ -216,7 +216,7 @@ class TestIsDropletTailscaleLocked:
     def test_missing_entry_returns_false(self, temp_ssh_config):
         """Test returns False when SSH config has no entry for droplet."""
         # Create SSH config without the target host
-        Path(temp_ssh_config).write_text("""Host tobcloud.othervm
+        Path(temp_ssh_config).write_text("""Host dropkit.othervm
     HostName 100.80.123.45
     User ubuntu
 """)
@@ -239,36 +239,36 @@ class TestIsDropletTailscaleLocked:
 class TestAddTemporarySshRule:
     """Tests for add_temporary_ssh_rule function."""
 
-    @patch("tobcloud.main.subprocess.run")
+    @patch("dropkit.main.subprocess.run")
     def test_success(self, mock_run):
         """Test successful SSH rule addition."""
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
-        result = add_temporary_ssh_rule("tobcloud.myvm")
+        result = add_temporary_ssh_rule("dropkit.myvm")
 
         assert result is True
         mock_run.assert_called_once()
         call_args = mock_run.call_args
-        assert "tobcloud.myvm" in call_args[0][0]
+        assert "dropkit.myvm" in call_args[0][0]
         assert "sudo ufw allow in on eth0 to any port 22" in call_args[0][0]
 
-    @patch("tobcloud.main.subprocess.run")
+    @patch("dropkit.main.subprocess.run")
     def test_failure(self, mock_run):
         """Test failed SSH rule addition."""
         mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="error")
 
-        result = add_temporary_ssh_rule("tobcloud.myvm")
+        result = add_temporary_ssh_rule("dropkit.myvm")
 
         assert result is False
 
-    @patch("tobcloud.main.subprocess.run")
+    @patch("dropkit.main.subprocess.run")
     def test_timeout(self, mock_run):
         """Test SSH timeout."""
         import subprocess
 
         mock_run.side_effect = subprocess.TimeoutExpired("ssh", 30)
 
-        result = add_temporary_ssh_rule("tobcloud.myvm")
+        result = add_temporary_ssh_rule("dropkit.myvm")
 
         assert result is False
 
@@ -279,7 +279,7 @@ class TestPrepareForHibernate:
     def test_not_tailscale_locked_returns_false(self, temp_ssh_config):
         """Test returns False when droplet is not Tailscale locked."""
         # Create SSH config with public IP (not Tailscale locked)
-        Path(temp_ssh_config).write_text("""Host tobcloud.myvm
+        Path(temp_ssh_config).write_text("""Host dropkit.myvm
     HostName 192.168.1.100
     User ubuntu
 """)
@@ -294,15 +294,15 @@ class TestPrepareForHibernate:
 
         assert result is False
 
-    @patch("tobcloud.main.tailscale_logout")
-    @patch("tobcloud.main.add_temporary_ssh_rule")
-    @patch("tobcloud.main.add_ssh_host")
+    @patch("dropkit.main.tailscale_logout")
+    @patch("dropkit.main.add_temporary_ssh_rule")
+    @patch("dropkit.main.add_ssh_host")
     def test_tailscale_locked_returns_true(
         self, mock_add_ssh_host, mock_add_temp_rule, mock_logout, temp_ssh_config
     ):
         """Test returns True when droplet is Tailscale locked."""
         # Create SSH config with Tailscale IP
-        Path(temp_ssh_config).write_text("""Host tobcloud.myvm
+        Path(temp_ssh_config).write_text("""Host dropkit.myvm
     HostName 100.80.123.45
     User ubuntu
 """)
@@ -326,15 +326,15 @@ class TestPrepareForHibernate:
         mock_logout.assert_called_once()
         mock_add_ssh_host.assert_called_once()
 
-    @patch("tobcloud.main.tailscale_logout")
-    @patch("tobcloud.main.add_temporary_ssh_rule")
-    @patch("tobcloud.main.add_ssh_host")
+    @patch("dropkit.main.tailscale_logout")
+    @patch("dropkit.main.add_temporary_ssh_rule")
+    @patch("dropkit.main.add_ssh_host")
     def test_temp_rule_failure_skips_logout(
         self, mock_add_ssh_host, mock_add_temp_rule, mock_logout, temp_ssh_config
     ):
         """Test returns True but skips logout if temp rule fails (safety)."""
         # Create SSH config with Tailscale IP
-        Path(temp_ssh_config).write_text("""Host tobcloud.myvm
+        Path(temp_ssh_config).write_text("""Host dropkit.myvm
     HostName 100.80.123.45
     User ubuntu
 """)

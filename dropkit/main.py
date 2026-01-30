@@ -1,4 +1,4 @@
-"""Main CLI application for tobcloud."""
+"""Main CLI application for dropkit."""
 
 import json
 import re
@@ -13,28 +13,28 @@ from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
-from tobcloud.api import DigitalOceanAPI, DigitalOceanAPIError
-from tobcloud.cloudinit import render_cloud_init
-from tobcloud.config import Config, TobcloudConfig
-from tobcloud.lock import requires_lock
-from tobcloud.ssh_config import (
+from dropkit.api import DigitalOceanAPI, DigitalOceanAPIError
+from dropkit.cloudinit import render_cloud_init
+from dropkit.config import Config, DropkitConfig
+from dropkit.lock import requires_lock
+from dropkit.ssh_config import (
     add_ssh_host,
     get_ssh_host_ip,
     host_exists,
     remove_known_hosts_entry,
     remove_ssh_host,
 )
-from tobcloud.ui import (
+from dropkit.ui import (
     display_images,
     display_projects,
     display_regions,
     display_sizes,
     prompt_with_help,
 )
-from tobcloud.version_check import check_for_updates
+from dropkit.version_check import check_for_updates
 
 app = typer.Typer(
-    name="tobcloud",
+    name="dropkit",
     help="Manage DigitalOcean droplets for ToB engineers",
 )
 console = Console()
@@ -139,7 +139,7 @@ def complete_snapshot_name(incomplete: str) -> list[str]:
     """
     Autocompletion function for hibernated snapshot names.
 
-    Fetches tobcloud snapshots from DigitalOcean for the current user
+    Fetches dropkit snapshots from DigitalOcean for the current user
     and extracts the droplet name from the snapshot name.
     This is used by Typer for shell completion (e.g., bash, zsh).
 
@@ -147,7 +147,7 @@ def complete_snapshot_name(incomplete: str) -> list[str]:
         incomplete: Partial text entered by the user
 
     Returns:
-        List of matching droplet names (without tobcloud- prefix)
+        List of matching droplet names (without dropkit- prefix)
     """
     try:
         if not Config.exists():
@@ -190,7 +190,7 @@ def load_config_and_api() -> tuple[Config, DigitalOceanAPI]:
         typer.Exit: If config doesn't exist or fails to load
     """
     if not Config.exists():
-        console.print("[red]Error: Config not found. Run 'tobcloud init' first.[/red]")
+        console.print("[red]Error: Config not found. Run 'dropkit init' first.[/red]")
         raise typer.Exit(1)
 
     config_manager = Config()
@@ -199,7 +199,7 @@ def load_config_and_api() -> tuple[Config, DigitalOceanAPI]:
     except Exception as e:
         console.print(f"[red]Error loading config: {e}[/red]")
         console.print(
-            "[yellow]Config file may be invalid. Try running[/yellow] [cyan]tobcloud init --force[/cyan]"
+            "[yellow]Config file may be invalid. Try running[/yellow] [cyan]dropkit init --force[/cyan]"
         )
         raise typer.Exit(1)
 
@@ -217,9 +217,9 @@ def get_ssh_hostname(droplet_name: str) -> str:
         droplet_name: Name of the droplet
 
     Returns:
-        SSH hostname with tobcloud prefix (e.g., "tobcloud.my-droplet")
+        SSH hostname with dropkit prefix (e.g., "dropkit.my-droplet")
     """
-    return f"tobcloud.{droplet_name}"
+    return f"dropkit.{droplet_name}"
 
 
 def get_snapshot_name(droplet_name: str) -> str:
@@ -230,22 +230,22 @@ def get_snapshot_name(droplet_name: str) -> str:
         droplet_name: Name of the droplet
 
     Returns:
-        Snapshot name with tobcloud prefix (e.g., "tobcloud-my-droplet")
+        Snapshot name with dropkit prefix (e.g., "dropkit-my-droplet")
     """
-    return f"tobcloud-{droplet_name}"
+    return f"dropkit-{droplet_name}"
 
 
 def get_droplet_name_from_snapshot(snapshot_name: str) -> str | None:
     """
-    Extract droplet name from a tobcloud snapshot name.
+    Extract droplet name from a dropkit snapshot name.
 
     Args:
-        snapshot_name: Snapshot name (e.g., "tobcloud-my-droplet")
+        snapshot_name: Snapshot name (e.g., "dropkit-my-droplet")
 
     Returns:
-        Droplet name if snapshot name is in tobcloud format, None otherwise
+        Droplet name if snapshot name is in dropkit format, None otherwise
     """
-    prefix = "tobcloud-"
+    prefix = "dropkit-"
     if snapshot_name.startswith(prefix):
         return snapshot_name[len(prefix) :]
     return None
@@ -253,7 +253,7 @@ def get_droplet_name_from_snapshot(snapshot_name: str) -> str | None:
 
 def get_user_hibernated_snapshots(api: DigitalOceanAPI, user_tag: str) -> list[dict[str, Any]]:
     """
-    Get hibernated tobcloud snapshots owned by the user.
+    Get hibernated dropkit snapshots owned by the user.
 
     Note: DO API doesn't support tag_name filter for snapshots, so we filter client-side.
 
@@ -262,13 +262,13 @@ def get_user_hibernated_snapshots(api: DigitalOceanAPI, user_tag: str) -> list[d
         user_tag: User's owner tag (e.g., "owner:username")
 
     Returns:
-        List of snapshot objects that are tobcloud hibernations owned by this user
+        List of snapshot objects that are dropkit hibernations owned by this user
     """
     snapshots = api.list_snapshots()
     return [
         s
         for s in snapshots
-        if s.get("name", "").startswith("tobcloud-") and user_tag in s.get("tags", [])
+        if s.get("name", "").startswith("dropkit-") and user_tag in s.get("tags", [])
     ]
 
 
@@ -294,7 +294,7 @@ def ensure_ssh_config(
     droplet: dict,
     droplet_name: str,
     username: str,
-    config: TobcloudConfig,
+    config: DropkitConfig,
 ) -> str:
     """
     Ensure SSH config entry exists for a droplet.
@@ -306,10 +306,10 @@ def ensure_ssh_config(
         droplet: Droplet dict from DigitalOcean API
         droplet_name: Name of the droplet
         username: Username for SSH connection
-        config: TobcloudConfig instance with SSH settings
+        config: DropkitConfig instance with SSH settings
 
     Returns:
-        SSH hostname (e.g., "tobcloud.my-droplet")
+        SSH hostname (e.g., "dropkit.my-droplet")
 
     Raises:
         ValueError: If droplet has no public IP
@@ -342,13 +342,13 @@ def ensure_ssh_config(
 
 
 def cleanup_ssh_entries(
-    config: TobcloudConfig, droplet_name: str, prompt_known_hosts: bool = True
+    config: DropkitConfig, droplet_name: str, prompt_known_hosts: bool = True
 ) -> None:
     """
     Remove SSH config entry and optionally clean up known_hosts for a droplet.
 
     Args:
-        config: TobcloudConfig instance with SSH settings.
+        config: DropkitConfig instance with SSH settings.
         droplet_name: Name of the droplet being removed.
         prompt_known_hosts: If True, prompt user before removing known_hosts entries.
     """
@@ -539,10 +539,10 @@ def register_ssh_keys_with_do(api: DigitalOceanAPI) -> tuple[list[str], list[int
                 ssh_key_ids.append(existing_key["id"])
                 console.print(f"[green]✓[/green] Key already registered: {Path(key_path).name}")
             else:
-                # Register new key with format: tobcloud-{username}-{fingerprint_prefix}
+                # Register new key with format: dropkit-{username}-{fingerprint_prefix}
                 # Use first 8 characters of fingerprint (without colons)
                 fingerprint_prefix = fingerprint.replace(":", "")[:8]
-                key_name = f"tobcloud-{username}-{fingerprint_prefix}"
+                key_name = f"dropkit-{username}-{fingerprint_prefix}"
                 console.print(f"[dim]Registering new key: {Path(key_path).name}...[/dim]")
                 new_key = api.add_ssh_key(key_name, key_content)
                 ssh_key_ids.append(new_key["id"])
@@ -563,7 +563,7 @@ def wait_for_cloud_init(ssh_hostname: str, verbose: bool = False) -> tuple[bool,
     It waits up to 10 minutes for cloud-init to complete.
 
     Args:
-        ssh_hostname: SSH hostname to connect to (e.g., "tobcloud.my-droplet")
+        ssh_hostname: SSH hostname to connect to (e.g., "dropkit.my-droplet")
         verbose: If True, show debug output
 
     Returns:
@@ -885,7 +885,7 @@ def is_tailscale_ip(ip: str) -> bool:
         return False
 
 
-def is_droplet_tailscale_locked(config: TobcloudConfig, droplet_name: str) -> bool:
+def is_droplet_tailscale_locked(config: DropkitConfig, droplet_name: str) -> bool:
     """
     Check if droplet is under Tailscale lockdown by examining SSH config IP.
 
@@ -893,7 +893,7 @@ def is_droplet_tailscale_locked(config: TobcloudConfig, droplet_name: str) -> bo
     Tailscale IP (100.64.0.0/10 range) rather than a public IP.
 
     Args:
-        config: TobcloudConfig instance with SSH settings
+        config: DropkitConfig instance with SSH settings
         droplet_name: Name of the droplet to check
 
     Returns:
@@ -953,7 +953,7 @@ def add_temporary_ssh_rule(ssh_hostname: str, verbose: bool = False) -> bool:
 
 
 def prepare_for_hibernate(
-    config: TobcloudConfig,
+    config: DropkitConfig,
     api: DigitalOceanAPI,
     droplet: dict,
     droplet_name: str,
@@ -967,7 +967,7 @@ def prepare_for_hibernate(
     2. Update SSH config to use public IP instead of Tailscale IP
 
     Args:
-        config: TobcloudConfig instance
+        config: DropkitConfig instance
         api: DigitalOceanAPI instance
         droplet: Droplet dict from API
         droplet_name: Name of the droplet
@@ -1308,7 +1308,7 @@ def install_tailscale_on_droplet(ssh_hostname: str, verbose: bool = False) -> bo
 def setup_tailscale(
     ssh_hostname: str,
     username: str,
-    config: TobcloudConfig,
+    config: DropkitConfig,
     verbose: bool = False,
 ) -> str | None:
     """
@@ -1322,9 +1322,9 @@ def setup_tailscale(
     5. Optionally lock down firewall to Tailscale only
 
     Args:
-        ssh_hostname: SSH hostname to connect to (e.g., "tobcloud.my-droplet")
+        ssh_hostname: SSH hostname to connect to (e.g., "dropkit.my-droplet")
         username: Username for SSH config
-        config: TobcloudConfig instance with tailscale and ssh settings
+        config: DropkitConfig instance with tailscale and ssh settings
         verbose: Show debug output
 
     Returns:
@@ -1517,9 +1517,9 @@ def init(
     ),
 ) -> None:
     """
-    Initialize tobcloud configuration.
+    Initialize dropkit configuration.
 
-    This will create a config directory at ~/.config/tobcloud/ and prompt
+    This will create a config directory at ~/.config/dropkit/ and prompt
     you for your DigitalOcean API token and default settings.
     """
     # Check if config already exists
@@ -1532,8 +1532,8 @@ def init(
 
     console.print(
         Panel.fit(
-            "[bold cyan]tobcloud initialization[/bold cyan]\n\n"
-            "This will set up your tobcloud configuration.",
+            "[bold cyan]dropkit initialization[/bold cyan]\n\n"
+            "This will set up your dropkit configuration.",
             border_style="cyan",
         )
     )
@@ -1724,7 +1724,7 @@ def init(
     console.print(table)
 
     console.print("\n[bold]Next steps:[/bold]")
-    console.print("  • Create a droplet: [cyan]tobcloud create <name>[/cyan]")
+    console.print("  • Create a droplet: [cyan]dropkit create <name>[/cyan]")
     console.print(
         "  • Customize cloud-init template (optional): copy from package and set template_path in config"
     )
@@ -1765,12 +1765,12 @@ def create(
         config_manager.load()
     except FileNotFoundError as e:
         console.print(f"[red]Error: {e}[/red]")
-        console.print("[yellow]Run[/yellow] [cyan]tobcloud init[/cyan] [yellow]first[/yellow]")
+        console.print("[yellow]Run[/yellow] [cyan]dropkit init[/cyan] [yellow]first[/yellow]")
         raise typer.Exit(1)
     except Exception as e:
         console.print(f"[red]Error loading config: {e}[/red]")
         console.print(
-            "[yellow]Config file may be invalid. Try running[/yellow] [cyan]tobcloud init --force[/cyan]"
+            "[yellow]Config file may be invalid. Try running[/yellow] [cyan]dropkit init --force[/cyan]"
         )
         raise typer.Exit(1)
 
@@ -1893,7 +1893,7 @@ def create(
     if existing_droplet:
         console.print(f"[red]Error: A droplet named '{name}' already exists[/red]")
         console.print(
-            f"[yellow]Use [cyan]tobcloud destroy {name}[/cyan] to delete it first, "
+            f"[yellow]Use [cyan]dropkit destroy {name}[/cyan] to delete it first, "
             f"or choose a different name[/yellow]"
         )
         raise typer.Exit(1)
@@ -1907,8 +1907,8 @@ def create(
                 f"[red]Error: A hibernated snapshot '{snapshot_name}' already exists[/red]"
             )
             console.print(
-                f"[yellow]Use [cyan]tobcloud wake {name}[/cyan] to restore it, "
-                f"[cyan]tobcloud destroy {name}[/cyan] to delete the snapshot, "
+                f"[yellow]Use [cyan]dropkit wake {name}[/cyan] to restore it, "
+                f"[cyan]dropkit destroy {name}[/cyan] to delete the snapshot, "
                 f"or choose a different name[/yellow]"
             )
             raise typer.Exit(1)
@@ -2205,7 +2205,7 @@ def list_droplets():
 
             for snapshot in hibernated:
                 snapshot_name = snapshot.get("name", "")
-                # Extract droplet name from snapshot name (remove "tobcloud-" prefix)
+                # Extract droplet name from snapshot name (remove "dropkit-" prefix)
                 droplet_name = get_droplet_name_from_snapshot(snapshot_name) or snapshot_name
 
                 size_gb = snapshot.get("size_gigabytes", 0)
@@ -2216,7 +2216,7 @@ def list_droplets():
 
             console.print(snap_table)
             console.print()
-            console.print("[dim]Wake with: tobcloud wake <name>[/dim]")
+            console.print("[dim]Wake with: dropkit wake <name>[/dim]")
 
         # Summary
         if droplets or hibernated:
@@ -2456,7 +2456,7 @@ def info(droplet_name: str = typer.Argument(..., autocompletion=complete_droplet
             console.print(f"  [green]✓[/green] In SSH config: [cyan]ssh {ssh_hostname}[/cyan]")
         else:
             console.print("  [yellow]✗[/yellow] Not in SSH config")
-            console.print(f"  [dim]Run: [cyan]tobcloud config-ssh {droplet_name}[/cyan][/dim]")
+            console.print(f"  [dim]Run: [cyan]dropkit config-ssh {droplet_name}[/cyan][/dim]")
 
         # Public IP for manual SSH
         public_ip = None
@@ -2628,7 +2628,7 @@ def destroy(droplet_name: str = typer.Argument(..., autocompletion=complete_drop
 
 def _complete_hibernate(
     api: DigitalOceanAPI,
-    config: TobcloudConfig,
+    config: DropkitConfig,
     droplet_id: int,
     droplet_name: str,
     snapshot_name: str,
@@ -2647,7 +2647,7 @@ def _complete_hibernate(
 
     Args:
         api: DigitalOceanAPI instance
-        config: TobcloudConfig instance
+        config: DropkitConfig instance
         droplet_id: ID of the droplet to destroy
         droplet_name: Name of the droplet
         snapshot_name: Name of the snapshot
@@ -2692,7 +2692,7 @@ def _complete_hibernate(
         size_gb = snapshot.get("size_gigabytes", 0)
         if size_gb:
             console.print(f"Snapshot size: {size_gb} GB")
-    console.print(f"Restore anytime with: [cyan]tobcloud wake {droplet_name}[/cyan]")
+    console.print(f"Restore anytime with: [cyan]dropkit wake {droplet_name}[/cyan]")
 
 
 def _destroy_hibernated_snapshot(
@@ -2823,7 +2823,7 @@ def rename(
                 f"[red]Error:[/red] Droplet '[cyan]{old_name}[/cyan]' "
                 f"is currently [bold]{status}[/bold]."
             )
-            console.print(f"[dim]Power on the droplet first with: tobcloud on {old_name}[/dim]")
+            console.print(f"[dim]Power on the droplet first with: dropkit on {old_name}[/dim]")
             raise typer.Exit(1)
 
         # Get detailed droplet info for display
@@ -2913,7 +2913,7 @@ def rename(
             except Exception as e:
                 console.print(f"[yellow]⚠[/yellow] Could not update SSH config: {e}")
                 console.print(
-                    f"[dim]Run 'tobcloud config-ssh {new_name}' to configure SSH manually[/dim]"
+                    f"[dim]Run 'dropkit config-ssh {new_name}' to configure SSH manually[/dim]"
                 )
         else:
             console.print(f"[dim]SSH config entry for {old_ssh_hostname} not found (skipped)[/dim]")
@@ -3301,7 +3301,7 @@ def off(droplet_name: str = typer.Argument(..., autocompletion=complete_droplet_
             "at the full hourly rate."
         )
         console.print(
-            "   Consider using [cyan]tobcloud hibernate[/cyan] to snapshot and destroy instead."
+            "   Consider using [cyan]dropkit hibernate[/cyan] to snapshot and destroy instead."
         )
         console.print()
 
@@ -3356,7 +3356,7 @@ def hibernate(
     Hibernate a droplet (snapshot and destroy to save costs).
 
     This will create a snapshot of the droplet, then destroy it.
-    You can restore it later with 'tobcloud wake <name>'.
+    You can restore it later with 'dropkit wake <name>'.
 
     Only droplets tagged with owner:<your-username> can be hibernated.
 
@@ -3421,7 +3421,7 @@ def hibernate(
                     console.print(f"[red]Error: Snapshot wait failed: {e}[/red]")
                     console.print(
                         "[yellow]⚠[/yellow] Droplet remains powered off. "
-                        "Run [cyan]tobcloud hibernate --continue[/cyan] again to retry."
+                        "Run [cyan]dropkit hibernate --continue[/cyan] again to retry."
                     )
                     raise typer.Exit(1)
             elif action_status == "completed":
@@ -3473,7 +3473,7 @@ def hibernate(
             )
         )
         console.print("This will snapshot the droplet and then destroy it.")
-        console.print(f"You can restore it later with [cyan]tobcloud wake {droplet_name}[/cyan]")
+        console.print(f"You can restore it later with [cyan]dropkit wake {droplet_name}[/cyan]")
         console.print()
 
         # Confirmation
@@ -3535,7 +3535,7 @@ def hibernate(
             console.print(f"[red]Error: Snapshot creation failed: {e}[/red]")
             console.print(
                 "[yellow]⚠[/yellow] Droplet remains powered off but intact. "
-                f"Run [cyan]tobcloud hibernate --continue {droplet_name}[/cyan] to retry."
+                f"Run [cyan]dropkit hibernate --continue {droplet_name}[/cyan] to retry."
             )
             raise typer.Exit(1)
 
@@ -3574,7 +3574,7 @@ def wake(
     re-setup Tailscale after the droplet becomes active. Use --no-tailscale to
     skip this and keep public SSH access.
 
-    Use 'tobcloud destroy <name>' to delete a hibernated snapshot without restoring.
+    Use 'dropkit destroy <name>' to delete a hibernated snapshot without restoring.
     """
     try:
         # Load config and API
@@ -3718,7 +3718,7 @@ def wake(
                 )
                 console.print(
                     f"[dim]Enable Tailscale later with: "
-                    f"[cyan]tobcloud enable-tailscale {droplet_name}[/cyan][/dim]"
+                    f"[cyan]dropkit enable-tailscale {droplet_name}[/cyan][/dim]"
                 )
             else:
                 console.print()
@@ -3739,7 +3739,7 @@ def wake(
                     )
                     console.print(
                         f"[dim]Complete setup later with: "
-                        f"[cyan]tobcloud enable-tailscale {droplet_name}[/cyan][/dim]"
+                        f"[cyan]dropkit enable-tailscale {droplet_name}[/cyan][/dim]"
                     )
 
         # Prompt to delete snapshot
@@ -3811,7 +3811,7 @@ def enable_tailscale(
                 f"[red]Error: Droplet must be active to enable Tailscale "
                 f"(current status: {status})[/red]"
             )
-            console.print("[dim]Use 'tobcloud on' to power on the droplet first.[/dim]")
+            console.print("[dim]Use 'dropkit on' to power on the droplet first.[/dim]")
             raise typer.Exit(1)
 
         # Ensure SSH config exists for this droplet
@@ -3877,9 +3877,9 @@ def enable_tailscale(
 
 @app.command(name="list-ssh-keys")
 def list_ssh_keys_cmd():
-    """List SSH keys registered via tobcloud.
+    """List SSH keys registered via dropkit.
 
-    Use 'tobcloud add-ssh-key' to add or import additional SSH keys.
+    Use 'dropkit add-ssh-key' to add or import additional SSH keys.
     """
     try:
         # Load config and API
@@ -3896,17 +3896,17 @@ def list_ssh_keys_cmd():
         console.print("[dim]Fetching SSH keys from DigitalOcean...[/dim]\n")
         all_keys = api.list_ssh_keys()
 
-        # Filter keys registered via tobcloud (prefixed with tobcloud-{username}-)
-        prefix = f"tobcloud-{username}-"
-        tobcloud_keys = [key for key in all_keys if key.get("name", "").startswith(prefix)]
+        # Filter keys registered via dropkit (prefixed with dropkit-{username}-)
+        prefix = f"dropkit-{username}-"
+        dropkit_keys = [key for key in all_keys if key.get("name", "").startswith(prefix)]
 
-        if not tobcloud_keys:
+        if not dropkit_keys:
             console.print(
-                f"[yellow]No SSH keys found registered via tobcloud for user: {username}[/yellow]"
+                f"[yellow]No SSH keys found registered via dropkit for user: {username}[/yellow]"
             )
-            console.print("[dim]Keys are automatically registered during 'tobcloud init'[/dim]")
+            console.print("[dim]Keys are automatically registered during 'dropkit init'[/dim]")
             console.print(
-                "[dim]Use 'tobcloud add-ssh-key <path>' to add or import additional keys[/dim]"
+                "[dim]Use 'dropkit add-ssh-key <path>' to add or import additional keys[/dim]"
             )
             return
 
@@ -3916,7 +3916,7 @@ def list_ssh_keys_cmd():
         table.add_column("ID", style="dim")
         table.add_column("Fingerprint", style="white")
 
-        for key in tobcloud_keys:
+        for key in dropkit_keys:
             table.add_row(
                 key.get("name", "N/A"),
                 str(key.get("id", "N/A")),
@@ -3924,7 +3924,7 @@ def list_ssh_keys_cmd():
             )
 
         console.print(table)
-        console.print(f"\n[dim]Total: {len(tobcloud_keys)} key(s)[/dim]")
+        console.print(f"\n[dim]Total: {len(dropkit_keys)} key(s)[/dim]")
 
     except DigitalOceanAPIError as e:
         console.print(f"[red]Error: {e}[/red]")
@@ -3940,10 +3940,10 @@ def add_ssh_key_cmd(
 
     This command can:
     - Register a new SSH key with DigitalOcean
-    - Import an existing key by renaming it to follow tobcloud naming convention
+    - Import an existing key by renaming it to follow dropkit naming convention
 
     If the key already exists in DigitalOcean with a different name, you'll be
-    prompted to rename it to the standard tobcloud format.
+    prompted to rename it to the standard dropkit format.
     """
     try:
         # Load config and API
@@ -3987,7 +3987,7 @@ def add_ssh_key_cmd(
 
         # Determine the desired key name
         fingerprint_prefix = fingerprint.replace(":", "")[:8]
-        desired_key_name = f"tobcloud-{username}-{fingerprint_prefix}"
+        desired_key_name = f"dropkit-{username}-{fingerprint_prefix}"
 
         if existing_key:
             existing_name = existing_key.get("name", "")
@@ -3997,7 +3997,7 @@ def add_ssh_key_cmd(
                 console.print("[red]Error: SSH key ID not found in API response[/red]")
                 raise typer.Exit(1)
 
-            # Check if key already has the correct tobcloud name
+            # Check if key already has the correct dropkit name
             if existing_name == desired_key_name:
                 console.print("[yellow]⚠[/yellow] SSH key already registered with correct name:")
                 console.print(f"  Name:        [cyan]{existing_name}[/cyan]")
@@ -4011,12 +4011,12 @@ def add_ssh_key_cmd(
             console.print(f"  ID:           [dim]{existing_id}[/dim]")
             console.print(f"  Fingerprint:  {fingerprint}")
             console.print()
-            console.print(f"  Suggested tobcloud name: [cyan]{desired_key_name}[/cyan]")
+            console.print(f"  Suggested dropkit name: [cyan]{desired_key_name}[/cyan]")
             console.print()
 
             # Ask for confirmation to rename
             confirm = Confirm.ask(
-                "Do you want to rename this key to follow tobcloud naming convention?",
+                "Do you want to rename this key to follow dropkit naming convention?",
                 default=True,
             )
 
@@ -4035,7 +4035,7 @@ def add_ssh_key_cmd(
             console.print(f"  Fingerprint: {updated_key.get('fingerprint', 'N/A')}")
             return
 
-        # Register new key with format: tobcloud-{username}-{fingerprint_prefix}
+        # Register new key with format: dropkit-{username}-{fingerprint_prefix}
         console.print(f"[dim]Registering SSH key as: {desired_key_name}...[/dim]")
         new_key = api.add_ssh_key(desired_key_name, key_content)
 
@@ -4055,7 +4055,7 @@ def add_ssh_key_cmd(
 def delete_ssh_key_cmd(
     key_name: str = typer.Argument(..., help="SSH key name to delete"),
 ):
-    """Delete an SSH key registered via tobcloud."""
+    """Delete an SSH key registered via dropkit."""
     try:
         # Load config and API
         _, api = load_config_and_api()
@@ -4067,11 +4067,11 @@ def delete_ssh_key_cmd(
             console.print(f"[red]Error fetching username from DigitalOcean: {e}[/red]")
             raise typer.Exit(1)
 
-        # Verify it's a tobcloud key for this user
-        prefix = f"tobcloud-{username}-"
+        # Verify it's a dropkit key for this user
+        prefix = f"dropkit-{username}-"
 
         if not key_name.startswith(prefix):
-            console.print(f"[red]Error: Key '{key_name}' is not a tobcloud-managed key[/red]")
+            console.print(f"[red]Error: Key '{key_name}' is not a dropkit-managed key[/red]")
             console.print(
                 f"[dim]Only keys with prefix '{prefix}' can be deleted via this command[/dim]"
             )
@@ -4090,7 +4090,7 @@ def delete_ssh_key_cmd(
 
         if not target_key:
             console.print(f"[red]Error: SSH key '{key_name}' not found[/red]")
-            console.print("[dim]Run 'tobcloud list-ssh-keys' to see available keys[/dim]")
+            console.print("[dim]Run 'dropkit list-ssh-keys' to see available keys[/dim]")
             raise typer.Exit(1)
 
         # Display key information
@@ -4128,10 +4128,10 @@ def delete_ssh_key_cmd(
 
 @app.command()
 def version():
-    """Show the version of tobcloud."""
-    from tobcloud import __version__
+    """Show the version of dropkit."""
+    from dropkit import __version__
 
-    console.print(f"tobcloud version [cyan]{__version__}[/cyan]")
+    console.print(f"dropkit version [cyan]{__version__}[/cyan]")
 
 
 def main():

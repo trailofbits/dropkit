@@ -5,7 +5,7 @@ import subprocess
 import time
 from unittest.mock import Mock, patch
 
-from tobcloud.version_check import (
+from dropkit.version_check import (
     commits_differ,
     extract_commit_from_version,
     get_last_check_file,
@@ -21,7 +21,7 @@ class TestGetLastCheckFile:
     def test_returns_correct_path(self, tmp_path, monkeypatch):
         """Test that get_last_check_file returns correct path."""
         # Mock Config.get_config_dir to return tmp_path
-        from tobcloud.config import Config
+        from dropkit.config import Config
 
         monkeypatch.setattr(Config, "get_config_dir", lambda: tmp_path)
 
@@ -36,7 +36,7 @@ class TestShouldCheckVersion:
 
     def test_no_file_returns_true(self, tmp_path, monkeypatch):
         """Test returns True when check file doesn't exist."""
-        from tobcloud.config import Config
+        from dropkit.config import Config
 
         monkeypatch.setattr(Config, "get_config_dir", lambda: tmp_path)
 
@@ -46,7 +46,7 @@ class TestShouldCheckVersion:
 
     def test_expired_check_returns_true(self, tmp_path, monkeypatch):
         """Test returns True when more than 24 hours have passed."""
-        from tobcloud.config import Config
+        from dropkit.config import Config
 
         monkeypatch.setattr(Config, "get_config_dir", lambda: tmp_path)
 
@@ -61,7 +61,7 @@ class TestShouldCheckVersion:
 
     def test_not_expired_returns_false(self, tmp_path, monkeypatch):
         """Test returns False when less than 24 hours have passed."""
-        from tobcloud.config import Config
+        from dropkit.config import Config
 
         monkeypatch.setattr(Config, "get_config_dir", lambda: tmp_path)
 
@@ -76,7 +76,7 @@ class TestShouldCheckVersion:
 
     def test_corrupted_file_returns_true(self, tmp_path, monkeypatch):
         """Test returns True when file contains invalid JSON."""
-        from tobcloud.config import Config
+        from dropkit.config import Config
 
         monkeypatch.setattr(Config, "get_config_dir", lambda: tmp_path)
 
@@ -90,7 +90,7 @@ class TestShouldCheckVersion:
 
     def test_missing_timestamp_returns_true(self, tmp_path, monkeypatch):
         """Test returns True when file missing timestamp key."""
-        from tobcloud.config import Config
+        from dropkit.config import Config
 
         monkeypatch.setattr(Config, "get_config_dir", lambda: tmp_path)
 
@@ -109,7 +109,7 @@ class TestUpdateLastCheckTime:
 
     def test_creates_file_with_correct_structure(self, tmp_path, monkeypatch):
         """Test creates file with timestamp and current_version."""
-        from tobcloud.config import Config
+        from dropkit.config import Config
 
         monkeypatch.setattr(Config, "get_config_dir", lambda: tmp_path)
 
@@ -129,7 +129,7 @@ class TestUpdateLastCheckTime:
 
     def test_creates_parent_directory(self, tmp_path, monkeypatch):
         """Test creates parent directory if it doesn't exist."""
-        from tobcloud.config import Config
+        from dropkit.config import Config
 
         nested_path = tmp_path / "nested" / "config"
         monkeypatch.setattr(Config, "get_config_dir", lambda: nested_path)
@@ -142,7 +142,7 @@ class TestUpdateLastCheckTime:
 
     def test_silent_failure_on_permission_error(self, tmp_path, monkeypatch):
         """Test silently fails if can't write file."""
-        from tobcloud.config import Config
+        from dropkit.config import Config
 
         monkeypatch.setattr(Config, "get_config_dir", lambda: tmp_path)
 
@@ -308,6 +308,6 @@ class TestGetLatestGitCommit:
         assert call_args == [
             "git",
             "ls-remote",
-            "https://github.com/trailofbits/tobcloud.git",
+            "https://github.com/trailofbits/dropkit.git",
             "HEAD",
         ]

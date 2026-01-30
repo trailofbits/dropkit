@@ -1,4 +1,4 @@
-"""tobcloud - Manage DigitalOcean droplets for ToB engineers."""
+"""dropkit - Manage DigitalOcean droplets for ToB engineers."""
 
 import subprocess
 from pathlib import Path

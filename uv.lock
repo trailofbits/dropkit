@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.11"
 
 [[package]]
@@ -388,6 +388,55 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/0f/d5/c66da9b79e5bdb124974bfe172b4daf3c984ebd9c2a06e2b8a4dc7331c72/defusedxml-0.7.1.tar.gz", hash = "sha256:1bb3032db185915b62d7c6209c5a8792be6a32ab2fedacc84e01b52c51aa3e69", size = 75520, upload-time = "2021-03-08T10:59:26.269Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/07/6c/aa3f2f849e01cb6a001cd8554a88d4c77c5c1a31c95bdf1cf9301e6d9ef4/defusedxml-0.7.1-py2.py3-none-any.whl", hash = "sha256:a352e7e428770286cc899e2542b6cdaedb2b4953ff269a210103ec58f6198a61", size = 25604, upload-time = "2021-03-08T10:59:24.45Z" },
+]
+
+[[package]]
+name = "dropkit"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "cryptography" },
+    { name = "jinja2" },
+    { name = "pydantic" },
+    { name = "pyyaml" },
+    { name = "requests" },
+    { name = "rich" },
+    { name = "shellingham" },
+    { name = "typer" },
+]
+
+[package.dev-dependencies]
+audit = [
+    { name = "pip-audit" },
+]
+dev = [
+    { name = "pip-audit" },
+    { name = "pytest" },
+    { name = "pytest-cov" },
+    { name = "ruff" },
+    { name = "ty" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "cryptography", specifier = ">=46.0.3" },
+    { name = "jinja2", specifier = ">=3.1.0" },
+    { name = "pydantic", specifier = ">=2.12.3" },
+    { name = "pyyaml", specifier = ">=6.0.1" },
+    { name = "requests", specifier = ">=2.31.0" },
+    { name = "rich", specifier = ">=13.0.0" },
+    { name = "shellingham", specifier = ">=1.5.0" },
+    { name = "typer", specifier = ">=0.9.0" },
+]
+
+[package.metadata.requires-dev]
+audit = [{ name = "pip-audit" }]
+dev = [
+    { name = "pip-audit" },
+    { name = "pytest", specifier = ">=8.4.2" },
+    { name = "pytest-cov" },
+    { name = "ruff", specifier = ">=0.8.0" },
+    { name = "ty" },
 ]
 
 [[package]]
@@ -982,55 +1031,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/e8/c4/ba2f8066cceb6f23394729afe52f3bf7adec04bf9ed2c820b39e19299111/sortedcontainers-2.4.0.tar.gz", hash = "sha256:25caa5a06cc30b6b83d11423433f65d1f9d76c4c6a0c90e3379eaa43b9bfdb88", size = 30594, upload-time = "2021-05-16T22:03:42.897Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/32/46/9cb0e58b2deb7f82b84065f37f3bffeb12413f947f9388e4cac22c4621ce/sortedcontainers-2.4.0-py2.py3-none-any.whl", hash = "sha256:a163dcaede0f1c021485e957a39245190e74249897e2ae4b2aa38595db237ee0", size = 29575, upload-time = "2021-05-16T22:03:41.177Z" },
-]
-
-[[package]]
-name = "tobcloud"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "cryptography" },
-    { name = "jinja2" },
-    { name = "pydantic" },
-    { name = "pyyaml" },
-    { name = "requests" },
-    { name = "rich" },
-    { name = "shellingham" },
-    { name = "typer" },
-]
-
-[package.dev-dependencies]
-audit = [
-    { name = "pip-audit" },
-]
-dev = [
-    { name = "pip-audit" },
-    { name = "pytest" },
-    { name = "pytest-cov" },
-    { name = "ruff" },
-    { name = "ty" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "cryptography", specifier = ">=46.0.3" },
-    { name = "jinja2", specifier = ">=3.1.0" },
-    { name = "pydantic", specifier = ">=2.12.3" },
-    { name = "pyyaml", specifier = ">=6.0.1" },
-    { name = "requests", specifier = ">=2.31.0" },
-    { name = "rich", specifier = ">=13.0.0" },
-    { name = "shellingham", specifier = ">=1.5.0" },
-    { name = "typer", specifier = ">=0.9.0" },
-]
-
-[package.metadata.requires-dev]
-audit = [{ name = "pip-audit" }]
-dev = [
-    { name = "pip-audit" },
-    { name = "pytest", specifier = ">=8.4.2" },
-    { name = "pytest-cov" },
-    { name = "ruff", specifier = ">=0.8.0" },
-    { name = "ty" },
 ]
 
 [[package]]

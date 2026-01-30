@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from tobcloud.ssh_config import (
+from dropkit.ssh_config import (
     add_ssh_host,
     get_ssh_host_ip,
     remove_known_hosts_entry,
@@ -662,14 +662,14 @@ class TestGetSSHHostIP:
 
     def test_tailscale_ip(self, temp_config):
         """Test getting Tailscale IP address."""
-        existing = """Host tobcloud.myhost
+        existing = """Host dropkit.myhost
     HostName 100.80.123.45
     User ubuntu
     ForwardAgent yes
 """
         Path(temp_config).write_text(existing)
 
-        result = get_ssh_host_ip(temp_config, "tobcloud.myhost")
+        result = get_ssh_host_ip(temp_config, "dropkit.myhost")
         assert result == "100.80.123.45"
 
     def test_multiple_hosts(self, temp_config):

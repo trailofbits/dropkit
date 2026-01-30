@@ -2,7 +2,7 @@
 
 import pytest
 
-from tobcloud.api import DigitalOceanAPI
+from dropkit.api import DigitalOceanAPI
 
 
 class TestDigitalOceanAPI:
