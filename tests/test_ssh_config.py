@@ -4,7 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from tobcloud.ssh_config import add_ssh_host, get_ssh_host_ip, remove_ssh_host
+from tobcloud.ssh_config import (
+    add_ssh_host,
+    get_ssh_host_ip,
+    remove_known_hosts_entry,
+    remove_ssh_host,
+)
 
 
 @pytest.fixture
@@ -726,3 +731,255 @@ Host anotherreal
         assert get_ssh_host_ip(temp_config, "192.168.1.100") is None
         # Should find the actual hosts
         assert get_ssh_host_ip(temp_config, "realhost") == "192.168.1.100"
+
+
+class TestRemoveKnownHostsEntry:
+    """Tests for remove_known_hosts_entry function."""
+
+    @pytest.fixture
+    def temp_known_hosts(self, temp_ssh_dir):
+        """Create a temporary known_hosts file path."""
+        known_hosts_path = temp_ssh_dir / "known_hosts"
+        return str(known_hosts_path)
+
+    def test_non_existent_file(self, temp_known_hosts):
+        """Test removing from non-existent known_hosts."""
+        assert not Path(temp_known_hosts).exists()
+        result = remove_known_hosts_entry(temp_known_hosts, ["myhost"])
+        assert result == 0
+
+    def test_no_matching_entries(self, temp_known_hosts):
+        """Test removing hostname that's not in known_hosts."""
+        existing = """otherhost ssh-ed25519 AAAA...
+192.168.1.1 ssh-rsa AAAA...
+"""
+        Path(temp_known_hosts).write_text(existing)
+
+        result = remove_known_hosts_entry(temp_known_hosts, ["myhost"])
+
+        assert result == 0
+        content = Path(temp_known_hosts).read_text()
+        assert "otherhost" in content
+        assert "192.168.1.1" in content
+
+    def test_remove_single_hostname(self, temp_known_hosts):
+        """Test removing a single hostname entry."""
+        existing = """myhost ssh-ed25519 AAAA...
+otherhost ssh-rsa AAAA...
+"""
+        Path(temp_known_hosts).write_text(existing)
+
+        result = remove_known_hosts_entry(temp_known_hosts, ["myhost"])
+
+        assert result == 1
+        content = Path(temp_known_hosts).read_text()
+        assert "myhost" not in content
+        assert "otherhost" in content
+
+    def test_remove_ip_address(self, temp_known_hosts):
+        """Test removing an IP address entry."""
+        existing = """192.168.1.100 ssh-ed25519 AAAA...
+10.0.0.1 ssh-rsa AAAA...
+"""
+        Path(temp_known_hosts).write_text(existing)
+
+        result = remove_known_hosts_entry(temp_known_hosts, ["192.168.1.100"])
+
+        assert result == 1
+        content = Path(temp_known_hosts).read_text()
+        assert "192.168.1.100" not in content
+        assert "10.0.0.1" in content
+
+    def test_remove_multiple_entries(self, temp_known_hosts):
+        """Test removing hostname and IP address together."""
+        existing = """tobcloud.myhost ssh-ed25519 AAAA...
+100.80.123.45 ssh-ed25519 AAAA...
+otherhost ssh-rsa AAAA...
+"""
+        Path(temp_known_hosts).write_text(existing)
+
+        result = remove_known_hosts_entry(temp_known_hosts, ["tobcloud.myhost", "100.80.123.45"])
+
+        assert result == 2
+        content = Path(temp_known_hosts).read_text()
+        assert "tobcloud.myhost" not in content
+        assert "100.80.123.45" not in content
+        assert "otherhost" in content
+
+    def test_comma_separated_hostnames(self, temp_known_hosts):
+        """Test removing entry with comma-separated hostnames."""
+        existing = """myhost,192.168.1.100 ssh-ed25519 AAAA...
+otherhost ssh-rsa AAAA...
+"""
+        Path(temp_known_hosts).write_text(existing)
+
+        # Should match by hostname
+        result = remove_known_hosts_entry(temp_known_hosts, ["myhost"])
+
+        assert result == 1
+        content = Path(temp_known_hosts).read_text()
+        assert "myhost" not in content
+        assert "192.168.1.100" not in content  # Whole line removed
+        assert "otherhost" in content
+
+    def test_comma_separated_match_by_ip(self, temp_known_hosts):
+        """Test removing entry by IP when comma-separated."""
+        existing = """myhost,192.168.1.100 ssh-ed25519 AAAA...
+otherhost ssh-rsa AAAA...
+"""
+        Path(temp_known_hosts).write_text(existing)
+
+        # Should match by IP
+        result = remove_known_hosts_entry(temp_known_hosts, ["192.168.1.100"])
+
+        assert result == 1
+        content = Path(temp_known_hosts).read_text()
+        assert "myhost" not in content
+        assert "192.168.1.100" not in content
+        assert "otherhost" in content
+
+    def test_bracketed_entry(self, temp_known_hosts):
+        """Test removing bracketed entry like [hostname]:port."""
+        existing = """[myhost]:2222 ssh-ed25519 AAAA...
+otherhost ssh-rsa AAAA...
+"""
+        Path(temp_known_hosts).write_text(existing)
+
+        result = remove_known_hosts_entry(temp_known_hosts, ["myhost"])
+
+        assert result == 1
+        content = Path(temp_known_hosts).read_text()
+        assert "[myhost]:2222" not in content
+        assert "otherhost" in content
+
+    def test_bracketed_ip_entry(self, temp_known_hosts):
+        """Test removing bracketed IP entry like [192.168.1.1]:2222."""
+        existing = """[192.168.1.100]:2222 ssh-ed25519 AAAA...
+otherhost ssh-rsa AAAA...
+"""
+        Path(temp_known_hosts).write_text(existing)
+
+        result = remove_known_hosts_entry(temp_known_hosts, ["192.168.1.100"])
+
+        assert result == 1
+        content = Path(temp_known_hosts).read_text()
+        assert "192.168.1.100" not in content
+        assert "otherhost" in content
+
+    def test_hashed_entries_preserved(self, temp_known_hosts):
+        """Test that hashed entries (|1|...) are preserved."""
+        existing = """|1|abc123...= ssh-ed25519 AAAA...
+myhost ssh-rsa AAAA...
+|1|def456...= ssh-ed25519 AAAA...
+"""
+        Path(temp_known_hosts).write_text(existing)
+
+        result = remove_known_hosts_entry(temp_known_hosts, ["myhost"])
+
+        assert result == 1
+        content = Path(temp_known_hosts).read_text()
+        assert "|1|abc123" in content
+        assert "|1|def456" in content
+        assert "myhost" not in content
+
+    def test_comments_preserved(self, temp_known_hosts):
+        """Test that comments are preserved."""
+        existing = """# This is a comment
+myhost ssh-ed25519 AAAA...
+# Another comment
+otherhost ssh-rsa AAAA...
+"""
+        Path(temp_known_hosts).write_text(existing)
+
+        result = remove_known_hosts_entry(temp_known_hosts, ["myhost"])
+
+        assert result == 1
+        content = Path(temp_known_hosts).read_text()
+        assert "# This is a comment" in content
+        assert "# Another comment" in content
+        assert "myhost" not in content
+        assert "otherhost" in content
+
+    def test_empty_lines_preserved(self, temp_known_hosts):
+        """Test that empty lines are preserved."""
+        existing = """myhost ssh-ed25519 AAAA...
+
+otherhost ssh-rsa AAAA...
+
+"""
+        Path(temp_known_hosts).write_text(existing)
+
+        result = remove_known_hosts_entry(temp_known_hosts, ["myhost"])
+
+        assert result == 1
+        content = Path(temp_known_hosts).read_text()
+        assert "myhost" not in content
+        assert "otherhost" in content
+        # Should preserve structure
+        assert "\n\n" in content or content.count("\n") >= 2
+
+    def test_case_insensitive_matching(self, temp_known_hosts):
+        """Test that hostname matching is case-insensitive."""
+        existing = """MyHost ssh-ed25519 AAAA...
+otherhost ssh-rsa AAAA...
+"""
+        Path(temp_known_hosts).write_text(existing)
+
+        result = remove_known_hosts_entry(temp_known_hosts, ["myhost"])
+
+        assert result == 1
+        content = Path(temp_known_hosts).read_text()
+        assert "MyHost" not in content
+        assert "otherhost" in content
+
+    def test_backup_created(self, temp_known_hosts):
+        """Test that backup file is created."""
+        existing = """myhost ssh-ed25519 AAAA...
+otherhost ssh-rsa AAAA...
+"""
+        Path(temp_known_hosts).write_text(existing)
+        Path(temp_known_hosts).chmod(0o600)
+
+        remove_known_hosts_entry(temp_known_hosts, ["myhost"])
+
+        backup_path = Path(temp_known_hosts).parent / "known_hosts.bak"
+        assert backup_path.exists()
+
+        backup_content = backup_path.read_text()
+        assert "myhost" in backup_content
+        assert "otherhost" in backup_content
+
+        # Check backup has same permissions
+        backup_mode = backup_path.stat().st_mode & 0o777
+        assert backup_mode == 0o600
+
+    def test_remove_all_entries(self, temp_known_hosts):
+        """Test removing all entries from known_hosts."""
+        existing = """myhost ssh-ed25519 AAAA...
+192.168.1.100 ssh-rsa AAAA...
+"""
+        Path(temp_known_hosts).write_text(existing)
+
+        result = remove_known_hosts_entry(temp_known_hosts, ["myhost", "192.168.1.100"])
+
+        assert result == 2
+        content = Path(temp_known_hosts).read_text()
+        assert content.strip() == ""
+
+    def test_tobcloud_hostname_format(self, temp_known_hosts):
+        """Test removing tobcloud-style hostname."""
+        existing = """tobcloud.my-droplet ssh-ed25519 AAAA...
+100.80.123.45 ssh-ed25519 AAAA...
+otherhost ssh-rsa AAAA...
+"""
+        Path(temp_known_hosts).write_text(existing)
+
+        result = remove_known_hosts_entry(
+            temp_known_hosts, ["tobcloud.my-droplet", "100.80.123.45"]
+        )
+
+        assert result == 2
+        content = Path(temp_known_hosts).read_text()
+        assert "tobcloud.my-droplet" not in content
+        assert "100.80.123.45" not in content
+        assert "otherhost" in content
