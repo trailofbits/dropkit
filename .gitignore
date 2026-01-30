@@ -11,3 +11,6 @@ dropkit/_version.txt
 
 # Virtual environments
 .venv
+
+# Git worktrees
+.worktrees/

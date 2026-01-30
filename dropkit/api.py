@@ -117,9 +117,10 @@ class DigitalOceanAPI:
     @staticmethod
     def _sanitize_email_for_username(email: str) -> str:
         """
-        Sanitize email address to create a valid username.
+        Sanitize email address to create a valid Linux username.
 
-        Removes @trailofbits.com suffix and replaces special characters.
+        Extracts the local part (before @) and replaces special characters
+        with underscores. Ensures the result is a valid Linux username.
 
         Args:
             email: Email address from DigitalOcean account
@@ -127,10 +128,10 @@ class DigitalOceanAPI:
         Returns:
             Sanitized username suitable for Linux user creation
         """
-        # Remove @trailofbits.com suffix (case insensitive)
+        # Remove @trailofbits.com suffix for backwards compatibility
         username = re.sub(r"@trailofbits\.com$", "", email, flags=re.IGNORECASE)
 
-        # If no @trailofbits.com, just take the part before @
+        # For other domains, extract username (part before @)
         if "@" in username:
             username = username.split("@")[0]
 
