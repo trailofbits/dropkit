@@ -217,26 +217,6 @@ The droplet might belong to someone else. List your droplets:
 dropkit list
 ```
 
-## Development
-
-### Setup Development Environment
-
-```bash
-git clone https://github.com/trailofbits/dropkit.git
-cd dropkit
-uv sync
-```
-
-### Running Tests
-
-```bash
-uv run pytest              # Run all tests
-uv run pytest -v           # Verbose output
-uv run pytest -k "test_*"  # Run specific tests
-```
-
-**Test Coverage**: Comprehensive suite covering API client, configuration validation, SSH config management, and helper functions.
-
 ## Technology Stack
 
 - **CLI Framework**: [Typer](https://typer.tiangolo.com/) - Modern CLI framework
@@ -277,16 +257,3 @@ uv run pytest -k "test_*"  # Run specific tests
 | **Manage SSH keys** | `ssh_key:read`, `ssh_key:create`, `ssh_key:update`, `ssh_key:delete` |
 
 For more information, see the [DigitalOcean API Token Scopes documentation](https://docs.digitalocean.com/reference/api/scopes/).
-
-## License
-
-Apache 2.0 - see [LICENSE](LICENSE)
-
-## Support
-
-- **Issues**: [GitHub Issues](https://github.com/trailofbits/dropkit/issues)
-- **Documentation**: See [CLAUDE.md](CLAUDE.md) for detailed development documentation
-
-## Credits
-
-Developed by Trail of Bits for internal infrastructure management.
