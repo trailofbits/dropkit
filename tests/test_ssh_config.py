@@ -974,9 +974,7 @@ otherhost ssh-rsa AAAA...
 """
         Path(temp_known_hosts).write_text(existing)
 
-        result = remove_known_hosts_entry(
-            temp_known_hosts, ["dropkit.my-droplet", "100.80.123.45"]
-        )
+        result = remove_known_hosts_entry(temp_known_hosts, ["dropkit.my-droplet", "100.80.123.45"])
 
         assert result == 2
         content = Path(temp_known_hosts).read_text()
