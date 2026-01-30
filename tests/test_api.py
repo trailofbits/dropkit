@@ -8,8 +8,8 @@ from dropkit.api import DigitalOceanAPI
 class TestDigitalOceanAPI:
     """Tests for DigitalOceanAPI class."""
 
-    def test_sanitize_email_for_username_trailofbits(self):
-        """Test sanitizing trailofbits.com email."""
+    def test_sanitize_email_for_username_trailofbits_backwards_compat(self):
+        """Test backwards compatibility: trailofbits.com emails still work."""
         username = DigitalOceanAPI._sanitize_email_for_username("john.doe@trailofbits.com")
         assert username == "john_doe"
 
@@ -32,6 +32,26 @@ class TestDigitalOceanAPI:
         """Test sanitizing empty email."""
         username = DigitalOceanAPI._sanitize_email_for_username("@trailofbits.com")
         assert username == "user"
+
+    def test_sanitize_email_for_username_google(self):
+        """Test sanitizing google.com email."""
+        username = DigitalOceanAPI._sanitize_email_for_username("jane.smith@google.com")
+        assert username == "jane_smith"
+
+    def test_sanitize_email_for_username_gmail(self):
+        """Test sanitizing gmail.com email."""
+        username = DigitalOceanAPI._sanitize_email_for_username("user123@gmail.com")
+        assert username == "user123"
+
+    def test_sanitize_email_for_username_corporate(self):
+        """Test sanitizing corporate email with subdomain."""
+        username = DigitalOceanAPI._sanitize_email_for_username("dev.ops@corp.company.com")
+        assert username == "dev_ops"
+
+    def test_sanitize_email_for_username_plus_addressing(self):
+        """Test sanitizing email with plus addressing (any domain)."""
+        username = DigitalOceanAPI._sanitize_email_for_username("user+tag@outlook.com")
+        assert username == "user_tag"
 
 
 class TestValidatePositiveInt:

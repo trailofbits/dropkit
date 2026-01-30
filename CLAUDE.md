@@ -55,7 +55,7 @@ dropkit/
 ### Username
 - **Derived from DigitalOcean account email**, not configured
 - Fetched via `/v2/account`, sanitized for Linux compatibility
-- `john.doe@trailofbits.com` → `john_doe`
+- `john.doe@example.com` → `john_doe`
 
 ### SSH Hostname
 - All SSH entries use `dropkit.<droplet-name>` format
