@@ -8,8 +8,8 @@ from dropkit.api import DigitalOceanAPI
 class TestDigitalOceanAPI:
     """Tests for DigitalOceanAPI class."""
 
-    def test_sanitize_email_for_username_trailofbits(self):
-        """Test sanitizing trailofbits.com email."""
+    def test_sanitize_email_for_username_trailofbits_backwards_compat(self):
+        """Test backwards compatibility: trailofbits.com emails still work."""
         username = DigitalOceanAPI._sanitize_email_for_username("john.doe@trailofbits.com")
         assert username == "john_doe"
 

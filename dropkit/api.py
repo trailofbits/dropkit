@@ -128,12 +128,8 @@ class DigitalOceanAPI:
         Returns:
             Sanitized username suitable for Linux user creation
         """
-        # Remove @trailofbits.com suffix for backwards compatibility
-        username = re.sub(r"@trailofbits\.com$", "", email, flags=re.IGNORECASE)
-
-        # For other domains, extract username (part before @)
-        if "@" in username:
-            username = username.split("@")[0]
+        # Extract local part (before @)
+        username = email.split("@")[0]
 
         # Replace dots, hyphens, and other special characters with underscores
         username = re.sub(r"[^a-z0-9_]", "_", username.lower())
