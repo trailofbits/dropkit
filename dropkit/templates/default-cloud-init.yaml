@@ -1,0 +1,135 @@
+#cloud-config
+
+# Update and upgrade system packages
+package_update: true
+package_upgrade: true
+disable_root_opts: no-port-forwarding,no-agent-forwarding,no-X11-forwarding
+
+apt:
+  sources:
+    docker:
+      keyid: 9DC858229FC7DD38854AE2D88D81803C0EBFCD88
+      keyserver: https://download.docker.com/linux/ubuntu/gpg
+      source: deb [arch=amd64 signed-by=$KEY_FILE] https://download.docker.com/linux/ubuntu $RELEASE stable
+
+# Install required packages
+packages:
+  - ufw
+  - zsh
+  - git
+  - curl
+  - wget
+  - build-essential
+  - fontconfig
+  - neovim
+  - apt-transport-https
+  - ca-certificates
+  - gnupg
+  - docker-ce
+  - docker-ce-cli
+  - containerd.io
+  - docker-buildx-plugin
+  - docker-compose-plugin
+
+users:
+  - name: {{ username }}
+    gecos: "{{ username }} user"
+    shell: /bin/bash
+    groups: sudo,admin,wheel,docker
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+    ssh_authorized_keys:{% for key in ssh_keys %}
+      - {{ key }}
+{% endfor %}
+# Write custom zshrc file
+write_files:
+  - path: /home/{{ username }}/.zshrc
+    owner: {{ username }}:{{ username }}
+    permissions: '0644'
+    defer: true
+    content: |
+      # Enable Powerlevel10k instant prompt. Should stay close to the top of ~/.zshrc.
+      # Initialization code that may require console input (password prompts, [y/n]
+      # confirmations, etc.) must go above this block; everything else may go below.
+      if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]; then
+        source "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh"
+      fi
+
+      DEFAULT_USER="{{ username }}"
+
+      # Zprezto + prompt configuration
+      source "${ZDOTDIR:-$HOME}/.zprezto/init.zsh"
+
+      autoload -Uz promptinit
+      promptinit
+      prompt powerlevel10k
+
+      # You may need to manually set your language environment
+      export LANG=en_US.UTF-8
+      export LC_ALL=en_US.UTF-8
+
+      # Preferred editor for local and remote sessions
+      export EDITOR='nvim'
+      export LESS='-R'
+
+      # Disable open-interpreter telemetry
+      export DISABLE_TELEMETRY=true
+
+      alias vim="nvim"
+
+      export PATH="$PATH:/home/{{ username }}/.local/bin"
+
+      # To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
+      [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
+
+# Run commands after boot
+runcmd:
+  # Configure UFW firewall
+  - ufw default deny incoming
+  - ufw default allow outgoing
+  - ufw allow OpenSSH
+  - ufw limit ssh
+  - ufw --force enable
+
+  {% if tailscale_enabled %}
+  # Install Tailscale via official script (daemon only, authentication handled by dropkit)
+  - curl -fsSL https://tailscale.com/install.sh | sh
+  {% endif %}
+
+  # Wait for user to be fully created
+  - |
+    timeout=30
+    count=0
+    while ! id {{ username }} >/dev/null 2>&1; do
+      if [ $count -ge $timeout ]; then
+        echo "Timeout waiting for user {{ username }} to be created"
+        exit 1
+      fi
+      sleep 1
+      count=$((count + 1))
+    done
+    echo "User {{ username }} is ready"
+
+  # Ensure home directory exists and has correct permissions
+  - mkdir -p /home/{{ username }}
+  - chown {{ username }}:{{ username }} /home/{{ username }}
+
+  # Configure git globally for the user
+  - su {{ username }} -c "git config --global user.name '{{ full_name }}'"
+  - su {{ username }} -c "git config --global user.email '{{ email }}'"
+
+  # Install zprezto for user
+  - su {{ username }} -c "zsh -c 'git clone --recursive https://github.com/sorin-ionescu/prezto.git /home/{{ username }}/.zprezto'"
+
+  # Create Zsh configuration using setopt EXTENDED_GLOB and loop through runcoms
+  - |
+    su {{ username }} -c "zsh -c '
+    setopt EXTENDED_GLOB
+    for rcfile in /home/{{ username }}/.zprezto/runcoms/^README.md(.N); do
+      ln -s "\$rcfile" "/home/{{ username }}/.\${rcfile:t}"
+    done
+    '"
+
+  # Set Zsh as default shell and ensure ownership
+  - chsh -s /usr/bin/zsh {{ username }}
+  - chown -R {{ username }}:{{ username }} /home/{{ username }}
+  - reboot

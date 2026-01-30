@@ -1,0 +1,13 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Build-generated version file
+dropkit/_version.txt
+
+# Virtual environments
+.venv

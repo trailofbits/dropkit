@@ -1,0 +1,58 @@
+{
+  "$schema": "https://raw.githubusercontent.com/devcontainers/spec/main/schemas/devContainer.schema.json",
+  "name": "dropkit",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "runArgs": ["--hostname=dropkit-dev"],
+  "features": {
+    "ghcr.io/devcontainers/features/python:1": {
+      "version": "3.13"
+    },
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+    "ghcr.io/tailscale/codespace/tailscale:1": {}
+  },
+  "remoteUser": "vscode",
+  "workspaceFolder": "/workspace",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
+  "mounts": [
+    "source=dropkit-zsh-history,target=/home/vscode/.zsh_history_data,type=volume",
+    "source=dropkit-claude,target=/home/vscode/.claude_data,type=volume",
+    "source=dropkit-gh,target=/home/vscode/.gh_data,type=volume",
+    "source=dropkit-config,target=/home/vscode/.config/dropkit,type=volume",
+    "source=dropkit-ssh,target=/home/vscode/.ssh,type=volume"
+  ],
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "anthropic.claude-code",
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "charliermarsh.ruff",
+        "eamodio.gitlens",
+        "tamasfe.even-better-toml"
+      ],
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "zsh",
+        "python.defaultInterpreterPath": "/workspace/.venv/bin/python",
+        "python.terminal.activateEnvironment": true,
+        "[python]": {
+          "editor.formatOnSave": true,
+          "editor.defaultFormatter": "charliermarsh.ruff",
+          "editor.codeActionsOnSave": {
+            "source.fixAll.ruff": "explicit",
+            "source.organizeImports.ruff": "explicit"
+          }
+        }
+      }
+    }
+  },
+  "onCreateCommand": "uv sync",
+  "updateContentCommand": "uv sync",
+  "postCreateCommand": "sudo chown -R vscode:vscode /home/vscode/.config/dropkit /home/vscode/.claude_data /home/vscode/.gh_data /home/vscode/.zsh_history_data /home/vscode/.ssh",
+  "containerEnv": {
+    "UV_LINK_MODE": "copy",
+    "CLAUDE_CONFIG_DIR": "/home/vscode/.claude_data",
+    "GH_CONFIG_DIR": "/home/vscode/.gh_data"
+  }
+}
