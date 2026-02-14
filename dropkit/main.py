@@ -2,7 +2,9 @@
 
 import json
 import re
+import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -735,6 +737,26 @@ def wait_for_cloud_init(ssh_hostname: str, verbose: bool = False) -> tuple[bool,
 
 # Tailscale helper functions
 
+_MACOS_TAILSCALE_PATH = "/Applications/Tailscale.app/Contents/MacOS/Tailscale"
+
+
+def find_tailscale_cli() -> str | None:
+    """
+    Find the Tailscale CLI binary.
+
+    Checks PATH first, then falls back to the macOS App Store location
+    where Tailscale is installed as a GUI app without a symlink in PATH.
+
+    Returns:
+        Path to the Tailscale CLI binary, or None if not found
+    """
+    path = shutil.which("tailscale")
+    if path is not None:
+        return path
+    if sys.platform == "darwin" and Path(_MACOS_TAILSCALE_PATH).exists():
+        return _MACOS_TAILSCALE_PATH
+    return None
+
 
 def check_local_tailscale() -> bool:
     """
@@ -743,18 +765,20 @@ def check_local_tailscale() -> bool:
     Returns:
         True if Tailscale is running and the user is connected to a tailnet
     """
+    tailscale_bin = find_tailscale_cli()
+    if tailscale_bin is None:
+        return False
+
     try:
         result = subprocess.run(
-            ["tailscale", "status", "--json"],
+            [tailscale_bin, "status", "--json"],
             capture_output=True,
             timeout=5,
         )
         if result.returncode != 0:
             return False
 
-        # Parse JSON to check if we're connected
         status = json.loads(result.stdout.decode("utf-8", errors="ignore"))
-        # BackendState should be "Running" if connected
         return status.get("BackendState") == "Running"
     except (FileNotFoundError, subprocess.TimeoutExpired, json.JSONDecodeError):
         return False

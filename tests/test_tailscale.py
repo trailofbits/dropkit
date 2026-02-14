@@ -9,6 +9,7 @@ from dropkit.config import TailscaleConfig
 from dropkit.main import (
     check_local_tailscale,
     check_tailscale_installed,
+    find_tailscale_cli,
     install_tailscale_on_droplet,
     is_tailscale_ip,
     lock_down_to_tailscale,
@@ -82,11 +83,48 @@ class TestIsTailscaleIP:
         assert is_tailscale_ip(None) is False  # type: ignore
 
 
+class TestFindTailscaleCli:
+    """Tests for find_tailscale_cli function."""
+
+    @patch("dropkit.main.shutil.which", return_value="/usr/bin/tailscale")
+    def test_found_in_path(self, mock_which):
+        """Test when tailscale is found in PATH."""
+        assert find_tailscale_cli() == "/usr/bin/tailscale"
+
+    @patch("dropkit.main.Path.exists", return_value=True)
+    @patch("dropkit.main.sys.platform", "darwin")
+    @patch("dropkit.main.shutil.which", return_value=None)
+    def test_macos_app_store_fallback(self, mock_which, mock_exists):
+        """Test fallback to macOS App Store location."""
+        assert find_tailscale_cli() == "/Applications/Tailscale.app/Contents/MacOS/Tailscale"
+
+    @patch("dropkit.main.Path.exists", return_value=False)
+    @patch("dropkit.main.sys.platform", "darwin")
+    @patch("dropkit.main.shutil.which", return_value=None)
+    def test_macos_app_not_installed(self, mock_which, mock_exists):
+        """Test when Tailscale is not installed on macOS."""
+        assert find_tailscale_cli() is None
+
+    @patch("dropkit.main.sys.platform", "linux")
+    @patch("dropkit.main.shutil.which", return_value=None)
+    def test_linux_not_in_path(self, mock_which):
+        """Test when tailscale is not in PATH on Linux (no macOS fallback)."""
+        assert find_tailscale_cli() is None
+
+    @patch("dropkit.main.Path.exists")
+    @patch("dropkit.main.shutil.which", return_value="/opt/bin/tailscale")
+    def test_which_returns_path_skips_fallback(self, mock_which, mock_exists):
+        """Test that PATH hit skips macOS App Store check."""
+        assert find_tailscale_cli() == "/opt/bin/tailscale"
+        mock_exists.assert_not_called()
+
+
 class TestCheckLocalTailscale:
     """Tests for check_local_tailscale function."""
 
+    @patch("dropkit.main.find_tailscale_cli", return_value="/usr/bin/tailscale")
     @patch("dropkit.main.subprocess.run")
-    def test_tailscale_running(self, mock_run):
+    def test_tailscale_running(self, mock_run, mock_find):
         """Test when Tailscale is running locally."""
         mock_run.return_value = MagicMock(
             returncode=0,
@@ -94,8 +132,9 @@ class TestCheckLocalTailscale:
         )
         assert check_local_tailscale() is True
 
+    @patch("dropkit.main.find_tailscale_cli", return_value="/usr/bin/tailscale")
     @patch("dropkit.main.subprocess.run")
-    def test_tailscale_not_running(self, mock_run):
+    def test_tailscale_not_running(self, mock_run, mock_find):
         """Test when Tailscale is installed but not running."""
         mock_run.return_value = MagicMock(
             returncode=0,
@@ -103,33 +142,42 @@ class TestCheckLocalTailscale:
         )
         assert check_local_tailscale() is False
 
+    @patch("dropkit.main.find_tailscale_cli", return_value="/usr/bin/tailscale")
     @patch("dropkit.main.subprocess.run")
-    def test_tailscale_command_fails(self, mock_run):
+    def test_tailscale_command_fails(self, mock_run, mock_find):
         """Test when tailscale command returns non-zero."""
         mock_run.return_value = MagicMock(returncode=1)
         assert check_local_tailscale() is False
 
-    @patch("dropkit.main.subprocess.run")
-    def test_tailscale_not_installed(self, mock_run):
-        """Test when tailscale is not installed."""
-        mock_run.side_effect = FileNotFoundError()
+    @patch("dropkit.main.find_tailscale_cli", return_value=None)
+    def test_tailscale_not_installed(self, mock_find):
+        """Test when tailscale binary is not found."""
         assert check_local_tailscale() is False
 
+    @patch("dropkit.main.find_tailscale_cli", return_value="/usr/bin/tailscale")
     @patch("dropkit.main.subprocess.run")
-    def test_tailscale_timeout(self, mock_run):
+    def test_tailscale_timeout(self, mock_run, mock_find):
         """Test when tailscale command times out."""
         import subprocess
 
         mock_run.side_effect = subprocess.TimeoutExpired("tailscale", 5)
         assert check_local_tailscale() is False
 
+    @patch("dropkit.main.find_tailscale_cli", return_value="/usr/bin/tailscale")
     @patch("dropkit.main.subprocess.run")
-    def test_invalid_json_response(self, mock_run):
+    def test_invalid_json_response(self, mock_run, mock_find):
         """Test when tailscale returns invalid JSON."""
         mock_run.return_value = MagicMock(
             returncode=0,
             stdout=b"not valid json",
         )
+        assert check_local_tailscale() is False
+
+    @patch("dropkit.main.find_tailscale_cli", return_value="/usr/bin/tailscale")
+    @patch("dropkit.main.subprocess.run")
+    def test_tailscale_binary_vanishes(self, mock_run, mock_find):
+        """Test race condition: binary found but gone by execution time."""
+        mock_run.side_effect = FileNotFoundError()
         assert check_local_tailscale() is False
 
 
