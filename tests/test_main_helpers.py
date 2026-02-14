@@ -4,10 +4,13 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+import typer
 
 from dropkit.main import (
+    _resize_hibernated_snapshot,
     add_temporary_ssh_rule,
     build_droplet_tags,
+    complete_droplet_or_snapshot_name,
     find_snapshot_action,
     get_droplet_name_from_snapshot,
     get_snapshot_name,
@@ -358,3 +361,102 @@ class TestPrepareForHibernate:
         mock_logout.assert_not_called()
         # And SSH config should NOT be updated (early return)
         mock_add_ssh_host.assert_not_called()
+
+
+class TestResizeHibernatedSnapshot:
+    """Tests for _resize_hibernated_snapshot function."""
+
+    def test_no_snapshot_id_exits(self):
+        """Test exits with error when snapshot has no ID."""
+        mock_api = MagicMock()
+        snapshot = {"tags": ["size:s-1vcpu-1gb"]}
+
+        with pytest.raises(typer.Exit):
+            _resize_hibernated_snapshot(mock_api, snapshot, "myvm", "s-2vcpu-4gb")
+
+    def test_no_size_tag_exits(self):
+        """Test exits with error when snapshot has no size: tag."""
+        mock_api = MagicMock()
+        snapshot = {"id": "12345", "tags": ["owner:testuser", "firewall"]}
+
+        with pytest.raises(typer.Exit):
+            _resize_hibernated_snapshot(mock_api, snapshot, "myvm", "s-2vcpu-4gb")
+
+    @patch("dropkit.main.Prompt.ask", return_value="yes")
+    def test_same_size_exits(self, mock_prompt):
+        """Test exits when new size matches current size."""
+        mock_api = MagicMock()
+        snapshot = {"id": "12345", "tags": ["size:s-1vcpu-1gb", "owner:testuser"]}
+
+        with pytest.raises(typer.Exit):
+            _resize_hibernated_snapshot(mock_api, snapshot, "myvm", "s-1vcpu-1gb")
+
+    @patch("dropkit.main.Prompt.ask", return_value="yes")
+    def test_successful_resize_swaps_tags(self, mock_prompt):
+        """Test successful resize creates new tag, tags resource, then untags old."""
+        mock_api = MagicMock()
+        mock_api.get_available_sizes.return_value = [
+            {"slug": "s-2vcpu-4gb", "vcpus": 2, "memory": 4096, "disk": 80, "price_monthly": 24},
+        ]
+        snapshot = {"id": "12345", "tags": ["size:s-1vcpu-1gb", "owner:testuser"]}
+
+        _resize_hibernated_snapshot(mock_api, snapshot, "myvm", "s-2vcpu-4gb")
+
+        # Verify tag operations: add new first, then remove old
+        mock_api.create_tag.assert_called_once_with("size:s-2vcpu-4gb")
+        mock_api.tag_resource.assert_called_once_with("size:s-2vcpu-4gb", "12345", "image")
+        mock_api.untag_resource.assert_called_once_with("size:s-1vcpu-1gb", "12345", "image")
+
+    @patch("dropkit.main.Prompt.ask", return_value="no")
+    def test_cancelled_resize_no_api_calls(self, mock_prompt):
+        """Test that cancelling resize makes no tag API calls."""
+        mock_api = MagicMock()
+        mock_api.get_available_sizes.return_value = [
+            {"slug": "s-2vcpu-4gb", "vcpus": 2, "memory": 4096, "disk": 80, "price_monthly": 24},
+        ]
+        snapshot = {"id": "12345", "tags": ["size:s-1vcpu-1gb", "owner:testuser"]}
+
+        with pytest.raises(typer.Exit):
+            _resize_hibernated_snapshot(mock_api, snapshot, "myvm", "s-2vcpu-4gb")
+
+        mock_api.create_tag.assert_not_called()
+        mock_api.tag_resource.assert_not_called()
+        mock_api.untag_resource.assert_not_called()
+
+    @patch("dropkit.main.Prompt.ask", return_value="yes")
+    def test_invalid_size_exits(self, mock_prompt):
+        """Test exits when provided size slug doesn't exist."""
+        mock_api = MagicMock()
+        mock_api.get_available_sizes.return_value = [
+            {"slug": "s-1vcpu-1gb", "vcpus": 1, "memory": 1024, "disk": 25, "price_monthly": 6},
+        ]
+        snapshot = {"id": "12345", "tags": ["size:s-1vcpu-1gb", "owner:testuser"]}
+
+        with pytest.raises(typer.Exit):
+            _resize_hibernated_snapshot(mock_api, snapshot, "myvm", "nonexistent-size")
+
+
+class TestCompleteDropletOrSnapshotName:
+    """Tests for complete_droplet_or_snapshot_name function."""
+
+    @patch("dropkit.main.complete_snapshot_name", return_value=["snap-vm"])
+    @patch("dropkit.main.complete_droplet_name", return_value=["live-vm"])
+    def test_combines_both_sources(self, mock_droplet, mock_snapshot):
+        """Test that results from both completers are combined."""
+        result = complete_droplet_or_snapshot_name("")
+        assert "live-vm" in result
+        assert "snap-vm" in result
+
+    @patch("dropkit.main.complete_snapshot_name", return_value=["shared-vm"])
+    @patch("dropkit.main.complete_droplet_name", return_value=["shared-vm"])
+    def test_deduplicates(self, mock_droplet, mock_snapshot):
+        """Test that duplicate names appear only once."""
+        result = complete_droplet_or_snapshot_name("")
+        assert result.count("shared-vm") == 1
+
+    @patch("dropkit.main.complete_snapshot_name", return_value=["snap-vm"])
+    @patch("dropkit.main.complete_droplet_name", return_value=["live-vm"])
+    def test_droplets_first(self, mock_droplet, mock_snapshot):
+        """Test that live droplet names appear before snapshot names."""
+        result = complete_droplet_or_snapshot_name("")
+        assert result.index("live-vm") < result.index("snap-vm")

@@ -875,15 +875,23 @@ class DigitalOceanAPI:
         Raises:
             DigitalOceanAPIError: If tagging fails
         """
-        payload = {
-            "resources": [
-                {
-                    "resource_id": resource_id,
-                    "resource_type": resource_type,
-                }
-            ]
-        }
+        payload = {"resources": [{"resource_id": resource_id, "resource_type": resource_type}]}
         self._request("POST", f"/tags/{tag_name}/resources", json=payload)
+
+    def untag_resource(self, tag_name: str, resource_id: str, resource_type: str) -> None:
+        """
+        Remove a tag from a resource.
+
+        Args:
+            tag_name: Tag name to remove
+            resource_id: Resource ID (string for snapshots/images)
+            resource_type: Resource type ('image' for snapshots, 'droplet', etc.)
+
+        Raises:
+            DigitalOceanAPIError: If untagging fails
+        """
+        payload = {"resources": [{"resource_id": resource_id, "resource_type": resource_type}]}
+        self._request("DELETE", f"/tags/{tag_name}/resources", json=payload)
 
     def create_tag(self, tag_name: str) -> dict[str, Any]:
         """

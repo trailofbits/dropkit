@@ -12,6 +12,9 @@ dropkit/_version.txt
 # Virtual environments
 .venv
 
+# Coverage
+.coverage
+
 # Git worktrees
 .worktrees/
 
