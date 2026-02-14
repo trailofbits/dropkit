@@ -1,5 +1,7 @@
 """Tests for DigitalOcean API client."""
 
+from unittest.mock import patch
+
 import pytest
 
 from dropkit.api import DigitalOceanAPI
@@ -125,3 +127,45 @@ class TestRenameDroplet:
         api = DigitalOceanAPI("fake-token")
         with pytest.raises(ValueError, match="droplet_id must be a positive integer"):
             api.rename_droplet(-1, "new-name")
+
+
+class TestUntagResource:
+    """Tests for untag_resource method."""
+
+    @patch.object(DigitalOceanAPI, "_request")
+    def test_untag_resource_calls_delete(self, mock_request):
+        """Test that untag_resource sends DELETE with correct payload."""
+        api = DigitalOceanAPI("fake-token")
+        api.untag_resource("size:s-1vcpu-1gb", "12345", "image")
+
+        mock_request.assert_called_once_with(
+            "DELETE",
+            "/tags/size:s-1vcpu-1gb/resources",
+            json={
+                "resources": [
+                    {
+                        "resource_id": "12345",
+                        "resource_type": "image",
+                    }
+                ]
+            },
+        )
+
+    @patch.object(DigitalOceanAPI, "_request")
+    def test_untag_resource_droplet_type(self, mock_request):
+        """Test untag_resource with droplet resource type."""
+        api = DigitalOceanAPI("fake-token")
+        api.untag_resource("owner:testuser", "67890", "droplet")
+
+        mock_request.assert_called_once_with(
+            "DELETE",
+            "/tags/owner:testuser/resources",
+            json={
+                "resources": [
+                    {
+                        "resource_id": "67890",
+                        "resource_type": "droplet",
+                    }
+                ]
+            },
+        )
