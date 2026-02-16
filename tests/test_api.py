@@ -151,21 +151,14 @@ class TestUntagResource:
             },
         )
 
-    @patch.object(DigitalOceanAPI, "_request")
-    def test_untag_resource_droplet_type(self, mock_request):
-        """Test untag_resource with droplet resource type."""
+    def test_untag_owner_tag_raises(self):
+        """Test that untag_resource raises ValueError for owner tags."""
         api = DigitalOceanAPI("fake-token")
-        api.untag_resource("owner:testuser", "67890", "droplet")
+        with pytest.raises(ValueError, match="Cannot remove protected tag: owner:john"):
+            api.untag_resource("owner:john", "12345", "droplet")
 
-        mock_request.assert_called_once_with(
-            "DELETE",
-            "/tags/owner:testuser/resources",
-            json={
-                "resources": [
-                    {
-                        "resource_id": "67890",
-                        "resource_type": "droplet",
-                    }
-                ]
-            },
-        )
+    def test_untag_firewall_tag_raises(self):
+        """Test that untag_resource raises ValueError for firewall tag."""
+        api = DigitalOceanAPI("fake-token")
+        with pytest.raises(ValueError, match="Cannot remove protected tag: firewall"):
+            api.untag_resource("firewall", "12345", "droplet")
