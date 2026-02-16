@@ -1499,9 +1499,12 @@ def setup_tailscale(
                     "[yellow]⚠[/yellow] SSH verification failed - you may need to wait a moment"
                 )
         else:
-            console.print(
-                "[yellow]⚠[/yellow] Local Tailscale not running - skipping firewall lockdown"
+            reason = (
+                "not running — skipping firewall lockdown"
+                if find_tailscale_cli()
+                else "not found — install it or add it to PATH"
             )
+            console.print(f"[yellow]⚠[/yellow] Tailscale {reason}")
             console.print(
                 "[dim]Public SSH access remains available. Start Tailscale locally and run:[/dim]"
             )

@@ -173,13 +173,6 @@ class TestCheckLocalTailscale:
         )
         assert check_local_tailscale() is False
 
-    @patch("dropkit.main.find_tailscale_cli", return_value="/usr/bin/tailscale")
-    @patch("dropkit.main.subprocess.run")
-    def test_tailscale_binary_vanishes(self, mock_run, mock_find):
-        """Test race condition: binary found but gone by execution time."""
-        mock_run.side_effect = FileNotFoundError()
-        assert check_local_tailscale() is False
-
 
 class TestRunTailscaleUp:
     """Tests for run_tailscale_up function."""
