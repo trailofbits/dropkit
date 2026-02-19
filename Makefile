@@ -1,16 +1,19 @@
-.PHONY: dev lint format test audit
+.PHONY: help dev lint format test audit
 
-dev:
+help: ## Show available targets
+	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  %-12s %s\n", $$1, $$2}'
+
+dev: ## Install all dependencies
 	uv sync --all-groups
 
-lint:
+lint: ## Run linter and type checker
 	uv run ruff format --check . && uv run ruff check . && uv run ty check dropkit/
 
-format:
+format: ## Auto-format code
 	uv run ruff format .
 
-test:
+test: ## Run tests
 	uv run pytest
 
-audit:
+audit: ## Audit dependencies for vulnerabilities
 	uv run pip-audit
