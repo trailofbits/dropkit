@@ -2243,6 +2243,7 @@ def create(
 
 
 @app.command(name="list")
+@app.command(name="ls", hidden=True)
 def list_droplets():
     """List droplets and hibernated snapshots tagged with owner:<username>."""
     try:
@@ -2597,6 +2598,7 @@ def info(droplet_name: str = typer.Argument(..., autocompletion=complete_droplet
 
 
 @app.command()
+@app.command(name="rm", hidden=True)
 @requires_lock("destroy")
 def destroy(droplet_name: str = typer.Argument(..., autocompletion=complete_droplet_name)):
     """
