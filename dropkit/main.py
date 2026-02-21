@@ -2272,6 +2272,7 @@ def list_droplets():
             table.add_column("Name", style="white", no_wrap=True)
             table.add_column("Status", style="white", no_wrap=True)
             table.add_column("IP Address", style="cyan", no_wrap=True)
+            table.add_column("Tailscale IP", style="magenta", no_wrap=True)
             table.add_column("Region", style="white", no_wrap=True)
             table.add_column("Size", style="white", no_wrap=True)
             table.add_column("SSH", style="white", no_wrap=True)
@@ -2292,9 +2293,11 @@ def list_droplets():
                 region = droplet.get("region", {}).get("slug", "N/A")
                 size = droplet.get("size_slug", "N/A")
 
-                # Check if in SSH config
+                # Check if in SSH config and get Tailscale IP
                 ssh_hostname = get_ssh_hostname(name)
                 in_ssh_config = "✓" if host_exists(config.ssh.config_path, ssh_hostname) else "✗"
+                ssh_ip = get_ssh_host_ip(config.ssh.config_path, ssh_hostname)
+                tailscale_ip = ssh_ip if ssh_ip and is_tailscale_ip(ssh_ip) else "—"
 
                 # Color status
                 if status == "active":
@@ -2304,7 +2307,9 @@ def list_droplets():
                 else:
                     status_colored = f"[red]{status}[/red]"
 
-                table.add_row(name, status_colored, ip_address, region, size, in_ssh_config)
+                table.add_row(
+                    name, status_colored, ip_address, tailscale_ip, region, size, in_ssh_config
+                )
 
             console.print(table)
 
