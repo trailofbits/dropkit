@@ -1057,17 +1057,9 @@ def prepare_for_hibernate(
 
     console.print("[green]✓[/green] Temporary SSH rule added")
 
-    # Now safe to logout from Tailscale (we have public IP fallback)
-    console.print("[dim]Logging out from Tailscale...[/dim]")
-    if tailscale_logout(ssh_hostname, verbose):
-        console.print("[green]✓[/green] Logged out from Tailscale")
-    else:
-        console.print(
-            "[yellow]⚠[/yellow] Could not logout from Tailscale "
-            "(device may remain in Tailscale admin console)"
-        )
-
-    # Get public IP from droplet
+    # Update SSH config to public IP BEFORE tailscale logout so the SSH
+    # session for the logout command routes over the public IP instead of
+    # the Tailscale IP (which dies when tailscale logs out).
     networks = droplet.get("networks", {})
     v4_networks = networks.get("v4", [])
     public_ip = None
@@ -1078,10 +1070,8 @@ def prepare_for_hibernate(
             break
 
     if public_ip:
-        # Update SSH config to use public IP
         console.print(f"[dim]Updating SSH config to public IP: {public_ip}[/dim]")
         try:
-            # Get username from API
             username = api.get_username()
             add_ssh_host(
                 config_path=config.ssh.config_path,
@@ -1094,6 +1084,16 @@ def prepare_for_hibernate(
         except Exception as e:
             if verbose:
                 console.print(f"[dim]Could not update SSH config: {e}[/dim]")
+
+    # Now safe to logout from Tailscale (SSH config points to public IP)
+    console.print("[dim]Logging out from Tailscale...[/dim]")
+    if tailscale_logout(ssh_hostname, verbose):
+        console.print("[green]✓[/green] Logged out from Tailscale")
+    else:
+        console.print(
+            "[yellow]⚠[/yellow] Could not logout from Tailscale "
+            "(device may remain in Tailscale admin console)"
+        )
 
     return True
 
@@ -2722,16 +2722,42 @@ def destroy(droplet_name: str = typer.Argument(..., autocompletion=complete_drop
         if tailscale_locked:
             # SSH config has the Tailscale IP - save it for cleanup
             droplet_tailscale_ip = get_ssh_host_ip(config.ssh.config_path, ssh_hostname)
-            # Try to logout from Tailscale
+
+            # Add temporary SSH rule so we can reach the droplet via public IP
             console.print()
-            console.print("[dim]Logging out from Tailscale...[/dim]")
-            if tailscale_logout(ssh_hostname):
-                console.print("[green]✓[/green] Logged out from Tailscale")
-            else:
+            console.print("[dim]Adding temporary SSH rule for eth0...[/dim]")
+            if not add_temporary_ssh_rule(ssh_hostname):
                 console.print(
-                    "[yellow]⚠[/yellow] Could not logout from Tailscale "
-                    "(device may remain in Tailscale admin console)"
+                    "[yellow]⚠[/yellow] Could not add temporary SSH rule - "
+                    "skipping Tailscale logout to maintain connectivity"
                 )
+            else:
+                console.print("[green]✓[/green] Temporary SSH rule added")
+
+                # Update SSH config to public IP before logout so the SSH
+                # session routes over the public IP instead of Tailscale
+                if droplet_public_ip:
+                    try:
+                        username = api.get_username()
+                        add_ssh_host(
+                            config_path=config.ssh.config_path,
+                            host_name=ssh_hostname,
+                            hostname=droplet_public_ip,
+                            user=username,
+                            identity_file=config.ssh.identity_file,
+                        )
+                    except Exception:
+                        pass
+
+                # Now safe to logout from Tailscale
+                console.print("[dim]Logging out from Tailscale...[/dim]")
+                if tailscale_logout(ssh_hostname):
+                    console.print("[green]✓[/green] Logged out from Tailscale")
+                else:
+                    console.print(
+                        "[yellow]⚠[/yellow] Could not logout from Tailscale "
+                        "(device may remain in Tailscale admin console)"
+                    )
         else:
             # SSH config has public IP, try to get Tailscale IP via SSH
             console.print("[dim]Checking for Tailscale IP...[/dim]")
@@ -3641,6 +3667,7 @@ def hibernate(
     continue_: bool = typer.Option(
         False, "--continue", "-c", help="Continue a timed-out hibernate operation"
     ),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show debug output"),
 ):
     """
     Hibernate a droplet (snapshot and destroy to save costs).
@@ -3807,7 +3834,7 @@ def hibernate(
         console.print()
 
         # Step 0: Prepare for hibernate (handle Tailscale lockdown if present)
-        tailscale_locked = prepare_for_hibernate(config, api, droplet, droplet_name)
+        tailscale_locked = prepare_for_hibernate(config, api, droplet, droplet_name, verbose)
 
         # Step 1: Power off if not already off
         if status != "off":
