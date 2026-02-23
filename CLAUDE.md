@@ -23,22 +23,9 @@ uv run dropkit --help        # CLI help
 
 ```
 dropkit/
-├── pyproject.toml              # Dependencies and metadata
-├── CLAUDE.md                   # This file
-├── README.md                   # User documentation
-├── dropkit/
-│   ├── main.py                 # Typer CLI entry point
-│   ├── config.py               # Config with SSH key validation
-│   ├── api.py                  # DigitalOcean REST API (see docstring for endpoints)
-│   ├── cloudinit.py            # Cloud-init template rendering
-│   ├── ssh_config.py           # SSH config manipulation
-│   └── templates/
-│       └── default-cloud-init.yaml
-└── tests/
-    ├── test_api.py
-    ├── test_config.py
-    ├── test_main_helpers.py
-    └── test_ssh_config.py
+├── dropkit/           # CLI source (Typer entry point: main.py)
+│   └── templates/     # Jinja2 cloud-init templates
+└── tests/             # pytest tests
 ```
 
 ## Technology Stack
@@ -150,6 +137,8 @@ uv run pytest tests/test_api.py            # Specific file
 uv run pytest -k "validate_ssh"            # Pattern match
 uv run pytest -v                           # Verbose
 ```
+
+**Coverage**: Minimum 29% enforced via `--cov-fail-under=29` in pyproject.toml.
 
 ## Pydantic Models
 
