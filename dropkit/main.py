@@ -1,10 +1,15 @@
 """Main CLI application for dropkit."""
 
+import contextlib
+import dataclasses
 import json
+import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -41,6 +46,13 @@ app = typer.Typer(
     help="Manage DigitalOcean droplets for ToB engineers",
 )
 console = Console()
+
+SSH_OPTS = [
+    "-o",
+    "StrictHostKeyChecking=no",
+    "-o",
+    "UserKnownHostsFile=/dev/null",
+]
 
 
 @app.callback()
@@ -644,10 +656,7 @@ def wait_for_cloud_init(ssh_hostname: str, verbose: bool = False) -> tuple[bool,
             result = subprocess.run(
                 [
                     "ssh",
-                    "-o",
-                    "StrictHostKeyChecking=no",
-                    "-o",
-                    "UserKnownHostsFile=/dev/null",
+                    *SSH_OPTS,
                     "-o",
                     "ConnectTimeout=5",
                     "-o",
@@ -825,10 +834,7 @@ def run_tailscale_up(ssh_hostname: str, verbose: bool = False) -> str | None:
         result = subprocess.run(
             [
                 "ssh",
-                "-o",
-                "StrictHostKeyChecking=no",
-                "-o",
-                "UserKnownHostsFile=/dev/null",
+                *SSH_OPTS,
                 "-o",
                 "ConnectTimeout=10",
                 ssh_hostname,
@@ -885,10 +891,7 @@ def tailscale_logout(ssh_hostname: str, verbose: bool = False) -> bool:
         result = subprocess.run(
             [
                 "ssh",
-                "-o",
-                "StrictHostKeyChecking=no",
-                "-o",
-                "UserKnownHostsFile=/dev/null",
+                *SSH_OPTS,
                 "-o",
                 "ConnectTimeout=10",
                 ssh_hostname,
@@ -1116,10 +1119,7 @@ def get_tailscale_ip(ssh_hostname: str) -> str | None:
         result = subprocess.run(
             [
                 "ssh",
-                "-o",
-                "StrictHostKeyChecking=no",
-                "-o",
-                "UserKnownHostsFile=/dev/null",
+                *SSH_OPTS,
                 "-o",
                 "ConnectTimeout=5",
                 "-o",
@@ -1171,10 +1171,7 @@ def wait_for_tailscale_ip(
             result = subprocess.run(
                 [
                     "ssh",
-                    "-o",
-                    "StrictHostKeyChecking=no",
-                    "-o",
-                    "UserKnownHostsFile=/dev/null",
+                    *SSH_OPTS,
                     "-o",
                     "ConnectTimeout=5",
                     "-o",
@@ -1240,10 +1237,7 @@ def lock_down_to_tailscale(ssh_hostname: str, verbose: bool = False) -> bool:
             result = subprocess.run(
                 [
                     "ssh",
-                    "-o",
-                    "StrictHostKeyChecking=no",
-                    "-o",
-                    "UserKnownHostsFile=/dev/null",
+                    *SSH_OPTS,
                     "-o",
                     "ConnectTimeout=10",
                     ssh_hostname,
@@ -1295,10 +1289,7 @@ def verify_tailscale_ssh(
         result = subprocess.run(
             [
                 "ssh",
-                "-o",
-                "StrictHostKeyChecking=no",
-                "-o",
-                "UserKnownHostsFile=/dev/null",
+                *SSH_OPTS,
                 "-o",
                 "ConnectTimeout=10",
                 "-o",
@@ -1338,10 +1329,7 @@ def check_tailscale_installed(ssh_hostname: str, verbose: bool = False) -> bool:
         result = subprocess.run(
             [
                 "ssh",
-                "-o",
-                "StrictHostKeyChecking=no",
-                "-o",
-                "UserKnownHostsFile=/dev/null",
+                *SSH_OPTS,
                 "-o",
                 "ConnectTimeout=10",
                 "-o",
@@ -1382,10 +1370,7 @@ def install_tailscale_on_droplet(ssh_hostname: str, verbose: bool = False) -> bo
         result = subprocess.run(
             [
                 "ssh",
-                "-o",
-                "StrictHostKeyChecking=no",
-                "-o",
-                "UserKnownHostsFile=/dev/null",
+                *SSH_OPTS,
                 "-o",
                 "ConnectTimeout=10",
                 ssh_hostname,
@@ -4441,6 +4426,646 @@ def delete_ssh_key_cmd(
     except DigitalOceanAPIError as e:
         console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(1)
+
+
+# --- setup-claude helpers ---
+
+
+@dataclasses.dataclass(frozen=True)
+class SyncChoice:
+    """One selectable item in the setup-claude sync prompt."""
+
+    label: str
+    key: str  # "claude_md", "settings", "github_token", or "marketplace:<name>"
+
+
+_GITHUB_TOKEN_PREFIXES = ("ghp_", "gho_", "github_pat_", "ghs_")
+
+
+def _discover_sync_choices() -> list[SyncChoice]:
+    """Build the list of sync items available on this machine.
+
+    Always includes CLAUDE.md and Settings when the local source exists.
+    Adds GitHub token when ``GITHUB_TOKEN`` is set with a valid prefix.
+    Discovers marketplaces from ``~/.claude/plugins/known_marketplaces.json``.
+    """
+    choices: list[SyncChoice] = []
+
+    if Path("~/.claude/CLAUDE.md").expanduser().exists():
+        choices.append(SyncChoice("Global CLAUDE.md", "claude_md"))
+    if Path("~/.claude/settings.json").expanduser().exists():
+        choices.append(SyncChoice("Settings (model prefs, UI, behavior)", "settings"))
+
+    pat = os.environ.get("GITHUB_TOKEN", "")
+    if pat and pat.startswith(_GITHUB_TOKEN_PREFIXES):
+        choices.append(SyncChoice("GitHub token", "github_token"))
+
+    mp_path = Path("~/.claude/plugins/known_marketplaces.json").expanduser()
+    if mp_path.is_file():
+        try:
+            mp_data = json.loads(mp_path.read_text(encoding="utf-8"))
+            choices.extend(
+                SyncChoice(f"Marketplace: {name}", f"marketplace:{name}")
+                for name in sorted(mp_data)
+            )
+        except (OSError, json.JSONDecodeError) as e:
+            console.print(
+                f"[yellow]Warning: Could not load marketplaces from {mp_path}: {e}[/yellow]"
+            )
+
+    return choices
+
+
+def _prompt_sync_selection(choices: list[SyncChoice]) -> set[str]:
+    """Show an interactive numbered list and return the selected keys.
+
+    Accepts comma-separated numbers, ``"all"`` (default), or ``"none"``.
+    Returns an empty set when the user types ``"none"`` or the list is empty.
+    """
+    if not choices:
+        return set()
+
+    console.print("\n[bold]What to set up on the droplet:[/bold]")
+    for i, choice in enumerate(choices, 1):
+        console.print(f"  {i}. {choice.label}")
+
+    answer = Prompt.ask(
+        '\nEnter numbers to sync (comma-separated), or "all"',
+        default="all",
+    )
+    answer = answer.strip().lower()
+
+    if answer == "all":
+        return {c.key for c in choices}
+    if answer == "none":
+        return set()
+
+    selected: set[str] = set()
+    for raw_part in answer.split(","):
+        part = raw_part.strip()
+        if not part:
+            continue
+        try:
+            idx = int(part)
+        except ValueError:
+            console.print(
+                f'[red]Invalid input: "{part}". Expected a number, "all", or "none".[/red]'
+            )
+            raise typer.Exit(1)
+        if 1 <= idx <= len(choices):
+            selected.add(choices[idx - 1].key)
+        else:
+            console.print(
+                f"[red]Invalid choice: {idx}. Must be between 1 and {len(choices)}.[/red]"
+            )
+            raise typer.Exit(1)
+
+    return selected
+
+
+# Keys safe to sync from settings.json — anything NOT on this list is stripped.
+# Excludes: permissions (local paths), env (secrets), hooks/apiKeyHelper/
+# awsAuthRefresh/awsCredentialExport/otelHeadersHelper/fileSuggestion (local
+# scripts), statusLine (may contain command), sandbox (internal infra), etc.
+_SETTINGS_SAFE_KEYS: set[str] = {
+    # Model preferences
+    "model",
+    "effortLevel",
+    "fastMode",
+    "availableModels",
+    "alwaysThinkingEnabled",
+    # UI / terminal
+    "language",
+    "prefersReducedMotion",
+    "showTurnDuration",
+    "spinnerTipsEnabled",
+    "spinnerTipsOverride",
+    "spinnerVerbs",
+    "terminalProgressBarEnabled",
+    "outputStyle",
+    "attorneyMode",
+    "teammateMode",
+    # Plugins
+    "enabledPlugins",
+    "extraKnownMarketplaces",
+    "strictKnownMarketplaces",
+    "skippedMarketplaces",
+    "skippedPlugins",
+    "pluginConfigs",
+    # MCP approval toggles (not server configs — those live in .mcp.json)
+    "enableAllProjectMcpServers",
+    "enabledMcpjsonServers",
+    "disabledMcpjsonServers",
+    # Behavioral
+    "respectGitignore",
+    "autoUpdatesChannel",
+    "disableAllHooks",
+    "cleanupPeriodDays",
+    "skipWebFetchPreflight",
+    # Git
+    "attribution",
+    "includeCoAuthoredBy",
+    # Admin / org
+    "forceLoginMethod",
+    "forceLoginOrgUUID",
+    "companyAnnouncements",
+}
+
+
+def _sanitize_settings(data: dict[str, Any]) -> dict[str, Any]:
+    """Return a copy of settings keeping only known-safe keys."""
+    result = {k: v for k, v in data.items() if k in _SETTINGS_SAFE_KEYS}
+    if "extraKnownMarketplaces" in result and isinstance(result["extraKnownMarketplaces"], dict):
+        result["extraKnownMarketplaces"] = {
+            name: source
+            for name, source in result["extraKnownMarketplaces"].items()
+            if isinstance(source, dict) and source.get("type") not in ("file", "directory")
+        }
+    return result
+
+
+def _sanitize_known_marketplaces(
+    data: dict[str, Any],
+    local_home: str,
+    remote_home: str,
+    marketplace_filter: set[str] | None = None,
+) -> dict[str, Any]:
+    """Rewrite installLocation paths from local home to remote home.
+
+    When *marketplace_filter* is set, only marketplace keys in the filter are
+    included in the output.
+    """
+    result: dict[str, Any] = {}
+    for key, entry in data.items():
+        if marketplace_filter is not None and key not in marketplace_filter:
+            continue
+        copied = dict(entry)
+        if "installLocation" in copied:
+            copied["installLocation"] = copied["installLocation"].replace(
+                local_home, remote_home, 1
+            )
+        result[key] = copied
+    return result
+
+
+def _sanitize_installed_plugins(
+    data: dict[str, Any],
+    local_home: str,
+    remote_home: str,
+    marketplace_filter: set[str] | None = None,
+) -> dict[str, Any]:
+    """Rewrite installPath for user-scope entries and strip local-scope entries.
+
+    Supports the v2 format: ``{"version": 2, "plugins": {name: [entries...]}}``.
+    Each plugin value is a list of entry dicts with scope/installPath fields.
+
+    When *marketplace_filter* is set, only plugins whose ``@source`` suffix
+    matches a name in the filter are included.
+    """
+    plugins = data.get("plugins", {})
+    result: dict[str, list[dict[str, Any]]] = {}
+    for key, entries in plugins.items():
+        if marketplace_filter is not None:
+            # Plugin keys use format "plugin-name@marketplace-name"
+            source = key.rsplit("@", 1)[-1] if "@" in key else ""
+            if source not in marketplace_filter:
+                continue
+        kept: list[dict[str, Any]] = []
+        for entry in entries:
+            if entry.get("scope") == "local":
+                continue
+            copied = dict(entry)
+            if "installPath" in copied:
+                copied["installPath"] = copied["installPath"].replace(local_home, remote_home, 1)
+            kept.append(copied)
+        if kept:
+            result[key] = kept
+    return {"version": data.get("version", 2), "plugins": result}
+
+
+# https://code.claude.com/docs/en/setup
+INSTALL_CLAUDE_CODE = "curl -fsSL https://claude.ai/install.sh | bash"
+
+
+def _ssh_cmd(ssh_hostname: str, remote_cmd: str) -> list[str]:
+    """Build an SSH command with standard options."""
+    return ["ssh", *SSH_OPTS, "-o", "ConnectTimeout=10", ssh_hostname, remote_cmd]
+
+
+def _decode_output(data: bytes) -> str:
+    """Decode subprocess output, replacing non-UTF-8 bytes."""
+    return data.decode("utf-8", errors="replace").strip()
+
+
+def _last_line(text: str, fallback: str = "unknown error") -> str:
+    """Return the last line of text, or a fallback if empty."""
+    return text.splitlines()[-1] if text else fallback
+
+
+def _install_claude_code(ssh_hostname: str, verbose: bool) -> bool:
+    """Install Claude Code via the native installer. Returns True on success."""
+    # Use login shell so PATH includes ~/.local/bin where Claude installs
+    version_cmd = "bash -lc 'claude --version'"
+    try:
+        result = subprocess.run(
+            _ssh_cmd(ssh_hostname, version_cmd),
+            capture_output=True,
+            timeout=30,
+        )
+    except (subprocess.TimeoutExpired, subprocess.SubprocessError) as e:
+        console.print(f"[red]FAILED[/red] ({e})")
+        return False
+    # Exit code 255 means SSH itself failed (connection refused, auth error, etc.)
+    if result.returncode == 255:
+        reason = _last_line(_decode_output(result.stderr), "SSH connection failed")
+        console.print(f"[red]FAILED[/red] ({reason})")
+        return False
+    if result.returncode == 0:
+        version_str = _decode_output(result.stdout)
+        console.print(f"[green]done[/green] (already installed: {version_str})")
+        return True
+
+    if result.returncode == 127:
+        if verbose:
+            console.print("[dim]claude not found, installing...[/dim]")
+    else:
+        stderr = _decode_output(result.stderr)
+        console.print(
+            f"[dim]claude exited with code {result.returncode}"
+            f" (reinstalling...){': ' + _last_line(stderr) if stderr else ''}[/dim]"
+        )
+    try:
+        result = subprocess.run(
+            _ssh_cmd(ssh_hostname, INSTALL_CLAUDE_CODE),
+            capture_output=True,
+            timeout=300,
+        )
+    except (subprocess.TimeoutExpired, subprocess.SubprocessError) as e:
+        console.print(f"[red]FAILED[/red] ({e})")
+        return False
+    if result.returncode != 0:
+        output = _decode_output(result.stderr) or _decode_output(result.stdout)
+        console.print("[red]FAILED[/red]")
+        if output:
+            console.print(f"[dim]  {output if verbose else _last_line(output)}[/dim]")
+        else:
+            console.print("[dim]  Install failed with no output. Re-run with --verbose.[/dim]")
+        return False
+
+    # Get installed version (best-effort, install already succeeded)
+    version_str = ""
+    try:
+        ver_result = subprocess.run(
+            _ssh_cmd(ssh_hostname, version_cmd),
+            capture_output=True,
+            timeout=30,
+        )
+        if ver_result.returncode == 0:
+            version_str = _decode_output(ver_result.stdout)
+    except (subprocess.TimeoutExpired, subprocess.SubprocessError):
+        pass  # Best-effort: install already succeeded, version display is cosmetic
+    suffix = f" ({version_str})" if version_str else ""
+    console.print(f"[green]done[/green]{suffix}")
+    return True
+
+
+def _auth_github(ssh_hostname: str, verbose: bool) -> None:
+    """Authenticate gh CLI on the droplet using GITHUB_TOKEN."""
+    pat = os.environ.get("GITHUB_TOKEN", "")
+    if not pat:
+        console.print("[yellow]skipped[/yellow] (GITHUB_TOKEN not set)")
+        return
+    if not pat.startswith(_GITHUB_TOKEN_PREFIXES):
+        console.print("[yellow]skipped[/yellow] (GITHUB_TOKEN does not look like a GitHub token)")
+        return
+
+    try:
+        result = subprocess.run(
+            _ssh_cmd(ssh_hostname, "gh auth login --with-token"),
+            input=pat.encode(),
+            capture_output=True,
+            timeout=60,
+        )
+    except (subprocess.TimeoutExpired, subprocess.SubprocessError) as e:
+        console.print(f"[yellow]FAILED[/yellow] ({e})")
+        return
+    if result.returncode == 255:
+        stderr = _decode_output(result.stderr)
+        console.print(f"[yellow]FAILED[/yellow] (SSH connection lost: {_last_line(stderr)})")
+        return
+    if result.returncode != 0:
+        stderr = _decode_output(result.stderr)
+        if "command not found" in stderr:
+            console.print("[yellow]FAILED[/yellow] (gh CLI not installed on droplet)")
+        else:
+            console.print(f"[yellow]FAILED[/yellow] ({_last_line(stderr)})")
+        if verbose and stderr:
+            console.print(f"[dim]  {stderr}[/dim]")
+        return
+
+    console.print("[green]done[/green]")
+
+
+def _sync_settings(
+    ssh_hostname: str,
+    verbose: bool,
+    remote_home: str,
+    selected: set[str] | None = None,
+) -> None:
+    """Rsync selected Claude settings to the droplet.
+
+    *selected* controls which items to sync.  When ``None``, everything is
+    synced (backwards-compatible / ``--sync-all`` behaviour).  Otherwise only
+    the items whose keys appear in *selected* are synced.
+    """
+    # Build sync path list dynamically based on selection.
+    # Each entry: (display_label, local_path_str, remote_path, excludes)
+    sync_paths: list[tuple[str, str, str, list[str]]] = []
+    if selected is None or "claude_md" in selected:
+        sync_paths.append(("CLAUDE.md", "~/.claude/CLAUDE.md", ".claude/CLAUDE.md", []))
+    if selected is None or "settings" in selected:
+        sync_paths.append(("settings.json", "~/.claude/settings.json", ".claude/settings.json", []))
+
+    # Marketplace items: sync filtered JSON manifests + per-marketplace dirs.
+    marketplace_names: set[str] = set()
+    if selected is not None:
+        marketplace_names = {
+            k.removeprefix("marketplace:") for k in selected if k.startswith("marketplace:")
+        }
+    has_marketplace = selected is None or bool(marketplace_names)
+    if has_marketplace:
+        mp_filter = marketplace_names or None  # None means "all"
+        sync_paths.append(
+            (
+                "known_marketplaces.json",
+                "~/.claude/plugins/known_marketplaces.json",
+                ".claude/plugins/known_marketplaces.json",
+                [],
+            )
+        )
+        sync_paths.append(
+            (
+                "installed_plugins.json",
+                "~/.claude/plugins/installed_plugins.json",
+                ".claude/plugins/installed_plugins.json",
+                [],
+            )
+        )
+        # Per-marketplace dirs (cache + marketplaces).  When filtering, only
+        # sync the selected marketplace subdirectories.
+        if mp_filter:
+            for name in sorted(mp_filter):
+                sync_paths.append(
+                    (
+                        f"marketplace:{name}",
+                        f"~/.claude/plugins/marketplaces/{name}/",
+                        f".claude/plugins/marketplaces/{name}/",
+                        [".git"],
+                    )
+                )
+                sync_paths.append(
+                    (
+                        f"cache:{name}",
+                        f"~/.claude/plugins/cache/{name}/",
+                        f".claude/plugins/cache/{name}/",
+                        [".git"],
+                    )
+                )
+        else:
+            sync_paths.append(
+                (
+                    "plugins/",
+                    "~/.claude/plugins/",
+                    ".claude/plugins/",
+                    ["known_marketplaces.json", "installed_plugins.json", ".git"],
+                )
+            )
+    else:
+        mp_filter = None
+
+    # Resolve which local paths actually exist before doing any remote work.
+    to_sync: list[tuple[str, str, Path, list[str]]] = []
+    for _label, local_path, remote_path, excludes in sync_paths:
+        expanded = Path(local_path).expanduser()
+        if expanded.exists():
+            to_sync.append((local_path, remote_path, expanded, excludes))
+        elif verbose:
+            console.print(f"[dim]  skipping {local_path} (not found locally)[/dim]")
+
+    if not to_sync:
+        console.print("[yellow]skipped[/yellow] (no local settings found)")
+        return
+
+    # Ensure remote directories exist.
+    dirs_to_create = ".claude .claude/plugins"
+    if has_marketplace:
+        dirs_to_create += " .claude/plugins/marketplaces .claude/plugins/cache"
+    try:
+        mkdir_result = subprocess.run(
+            _ssh_cmd(ssh_hostname, f"mkdir -p {dirs_to_create}"),
+            capture_output=True,
+            timeout=30,
+        )
+    except (subprocess.TimeoutExpired, subprocess.SubprocessError) as e:
+        console.print(f"[yellow]FAILED[/yellow] (mkdir: {e})")
+        return
+    if mkdir_result.returncode != 0:
+        stderr = _decode_output(mkdir_result.stderr)
+        console.print(f"[yellow]FAILED[/yellow] (mkdir: {_last_line(stderr)})")
+        return
+
+    rsync_ssh = "ssh " + " ".join(shlex.quote(o) for o in SSH_OPTS)
+    local_home = str(Path.home())
+    synced = 0
+    failures: list[str] = []
+    for local_path, remote_path, expanded, excludes in to_sync:
+        # Sanitize JSON files: strip sensitive keys / rewrite paths before syncing.
+        tmp_path: Path | None = None
+        rsync_source = str(expanded) + ("/" if expanded.is_dir() else "")
+        if expanded.name in ("settings.json", "known_marketplaces.json", "installed_plugins.json"):
+            try:
+                data = json.loads(expanded.read_text(encoding="utf-8"))
+                if expanded.name == "settings.json":
+                    sanitized = _sanitize_settings(data)
+                elif expanded.name == "known_marketplaces.json":
+                    sanitized = _sanitize_known_marketplaces(
+                        data, local_home, remote_home, marketplace_filter=mp_filter
+                    )
+                elif expanded.name == "installed_plugins.json":
+                    sanitized = _sanitize_installed_plugins(
+                        data, local_home, remote_home, marketplace_filter=mp_filter
+                    )
+                prefix = f"dropkit-{expanded.stem}-"
+                tmp_fd, tmp_name = tempfile.mkstemp(suffix=".json", prefix=prefix)
+                os.close(tmp_fd)
+                tmp_path = Path(tmp_name)
+                tmp_path.write_text(json.dumps(sanitized, indent=2), encoding="utf-8")
+                rsync_source = str(tmp_path)
+            except (OSError, json.JSONDecodeError) as e:
+                if verbose:
+                    console.print(f"[dim]  skipping {local_path} (sanitize failed: {e})[/dim]")
+                failures.append(f"{local_path} (sanitize failed: {e})")
+                if tmp_path:
+                    with contextlib.suppress(OSError):
+                        tmp_path.unlink()
+                continue
+
+        try:
+            rsync_cmd = [
+                "rsync",
+                "-az",
+                "--no-perms",
+                *[f"--exclude={e}" for e in excludes],
+                "-e",
+                rsync_ssh,
+                rsync_source,
+                f"{ssh_hostname}:{remote_path}",
+            ]
+
+            if verbose:
+                console.print(f"[dim]  {' '.join(rsync_cmd)}[/dim]")
+
+            try:
+                result = subprocess.run(rsync_cmd, capture_output=True, timeout=300)
+            except (subprocess.TimeoutExpired, subprocess.SubprocessError, OSError) as e:
+                failures.append(f"{local_path} ({e})")
+                continue
+            if result.returncode != 0:
+                stderr = _decode_output(result.stderr)
+                failures.append(f"{local_path} ({_last_line(stderr)})")
+                if verbose and stderr:
+                    console.print(f"[dim]  {local_path}: {stderr}[/dim]")
+                continue
+            synced += 1
+        finally:
+            if tmp_path:
+                with contextlib.suppress(OSError):
+                    tmp_path.unlink()
+
+    if failures:
+        console.print(f"[yellow]FAILED[/yellow] ({', '.join(failures)})")
+    else:
+        console.print(f"[green]done[/green] ({synced} path(s))")
+
+
+def _open_auth_session(ssh_hostname: str, verbose: bool) -> bool:
+    """Run ``claude /login`` on the droplet for Claude Code authentication.
+
+    Returns True if the session exited cleanly, False otherwise.
+    """
+    console.print(
+        "\n[bold]Authenticate Claude Code[/bold]"
+        "\n  1. Visit the link shown below and complete sign-in"
+        "\n  2. Paste the code back into this terminal\n"
+    )
+
+    # Run `claude /login` inside an ephemeral temp directory so that Claude
+    # Code doesn't trust the home directory tree.  The trap ensures cleanup
+    # even on signals.  Using `bash -lc` bypasses zsh/p10k first-time setup.
+    login_cmd = (
+        "bash -lc 'dir=$(mktemp -d) && "
+        "trap '\"'\"'rm -rf \"$dir\"'\"'\"' EXIT && "
+        'cd "$dir" && claude /login\''
+    )
+
+    ssh_cmd = [
+        "ssh",
+        "-t",
+        *SSH_OPTS,
+        "-o",
+        "ConnectTimeout=10",
+        ssh_hostname,
+        login_cmd,
+    ]
+
+    if verbose:
+        console.print(f"[dim]  {' '.join(ssh_cmd)}[/dim]")
+
+    try:
+        result = subprocess.run(ssh_cmd)
+    except KeyboardInterrupt:
+        console.print(
+            "\n[dim]Session interrupted. If you haven't completed authentication, "
+            "re-run: dropkit setup-claude <droplet-name>[/dim]"
+        )
+        raise typer.Exit(code=130)
+    except (OSError, subprocess.SubprocessError) as e:
+        console.print(f"[red]Failed to launch SSH: {e}[/red]")
+        raise typer.Exit(code=1)
+    if result.returncode == 255:
+        console.print(
+            "[red]SSH connection failed. Check that the droplet is running and accessible.[/red]"
+        )
+        return False
+    # Non-zero exit from `claude /login` is normal — e.g. the user cancelled.
+    return True
+
+
+@app.command(name="setup-claude")
+def setup_claude(
+    droplet_name: str = typer.Argument(
+        ..., help="Name of the droplet to configure.", autocompletion=complete_droplet_name
+    ),
+    sync_all: bool = typer.Option(False, "--sync-all", help="Sync all settings without prompting."),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed output."),
+) -> None:
+    """Set up Claude Code on an existing droplet.
+
+    Installs Claude Code, shows an interactive prompt to select which settings
+    to sync (CLAUDE.md, settings, GitHub token, marketplaces), then opens an
+    SSH session for Claude subscription login.
+
+    Use --sync-all to skip the prompt and sync everything (useful for scripts).
+
+    Only droplets tagged with owner:<your-username> can be configured.
+    """
+    _, api = load_config_and_api()
+    droplet, username = find_user_droplet(api, droplet_name)
+    if not droplet:
+        tag = get_user_tag(username)
+        console.print(
+            f"[red]Error: Droplet '{droplet_name}' not found (filtered by tag: {tag})[/red]"
+        )
+        raise typer.Exit(code=1)
+
+    ssh_hostname = get_ssh_hostname(droplet_name)
+
+    console.print(f"Setting up Claude Code on [cyan]{ssh_hostname}[/cyan]...\n")
+
+    # Step 1: Install (fatal)
+    console.print("  Installing Claude Code...       ", end="")
+    if not _install_claude_code(ssh_hostname, verbose):
+        console.print("\n[red]Error: Claude Code installation failed. Aborting.[/red]")
+        raise typer.Exit(code=1)
+
+    # Step 2: Interactive prompt OR --sync-all
+    if sync_all:
+        selected: set[str] | None = None  # None = sync everything
+        run_github = True
+    else:
+        choices = _discover_sync_choices()
+        selected_keys = _prompt_sync_selection(choices) if choices else set()
+        run_github = "github_token" in selected_keys
+        # Remove github_token from the set — it's handled by _auth_github, not _sync_settings
+        non_github = selected_keys - {"github_token"}
+        selected = non_github  # empty set = sync nothing via _sync_settings
+
+    # Step 3: GitHub auth (only when selected or --sync-all)
+    if run_github:
+        console.print("  Authenticating GitHub CLI...    ", end="")
+        _auth_github(ssh_hostname, verbose)
+
+    # Step 4: Sync settings (based on selection)
+    if selected is None or selected:
+        console.print("  Syncing settings...             ", end="")
+        _sync_settings(ssh_hostname, verbose, remote_home=f"/home/{username}", selected=selected)
+    elif verbose:
+        console.print("  Syncing settings...             [dim]skipped[/dim] (nothing selected)")
+
+    # Step 5: Authenticate Claude Code (always last)
+    console.print("  Authenticating Claude Code...   [dim]a link will appear below[/dim]")
+    if not _open_auth_session(ssh_hostname, verbose):
+        raise typer.Exit(code=1)
 
 
 @app.command()

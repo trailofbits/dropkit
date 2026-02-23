@@ -98,6 +98,7 @@ Commands:
   off              Power off a droplet (requires confirmation).
   hibernate        Hibernate a droplet (snapshot and destroy to save costs).
   wake             Wake a hibernated droplet (restore from snapshot).
+  setup-claude     Set up Claude Code on an existing droplet.
   enable-tailscale Enable Tailscale VPN on an existing droplet.
   list-ssh-keys    List SSH keys registered via dropkit.
   add-ssh-key      Add or import an SSH public key to DigitalOcean.
@@ -179,6 +180,46 @@ dropkit destroy my-droplet
 4. After waking, you're prompted to delete the snapshot (default: yes)
 
 **Note:** Snapshots are billed at $0.06/GB/month, which is typically much cheaper than keeping a droplet running.
+
+### Claude Code Setup
+
+Set up [Claude Code](https://claude.ai/claude-code) on a droplet for sandboxed AI development:
+
+```bash
+# Create a droplet, then set up Claude Code
+dropkit create my-sandbox
+dropkit setup-claude my-sandbox
+```
+
+After installing Claude Code, an interactive prompt lets you choose what to sync:
+
+```
+What to set up on the droplet:
+  1. Global CLAUDE.md
+  2. Settings (model prefs, UI, behavior)
+  3. GitHub token
+  4. Marketplace: claude-plugins-official
+
+Enter numbers to sync (comma-separated), or "all" [all]:
+```
+
+Use `--sync-all` to skip the prompt and sync everything (useful for scripting):
+
+```bash
+dropkit setup-claude my-sandbox --sync-all
+```
+
+**What it does:**
+1. Installs Claude Code via the official installer
+2. Prompts you to select which settings to sync (CLAUDE.md, settings, GitHub token, marketplaces)
+3. Syncs your selected items to the droplet
+4. Runs `claude /login` on the droplet for you to authenticate your Claude subscription
+
+**GitHub CLI authentication:**
+```bash
+export GITHUB_TOKEN=ghp_...
+dropkit setup-claude my-sandbox
+```
 
 ### Cloud-Init Customization
 
