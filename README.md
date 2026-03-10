@@ -217,6 +217,29 @@ The droplet might belong to someone else. List your droplets:
 dropkit list
 ```
 
+## Development
+
+### Running Unit Tests
+
+```bash
+uv run pytest                # All tests
+uv run pytest -v             # Verbose output
+uv run pytest -k "pattern"   # Filter by name
+```
+
+### Running E2E Tests
+
+The E2E lifecycle test creates a real droplet, verifies SSH connectivity,
+and destroys it. Run before pushing changes that affect core workflows.
+
+```bash
+./tests/e2e/test_lifecycle.sh
+```
+
+Requires a valid dropkit config (`~/.config/dropkit/config.yaml`).
+Optional environment variables: `DROPLET_NAME`, `DROPLET_REGION`,
+`DROPLET_SIZE`, `DROPLET_IMAGE`, `E2E_SSH_TIMEOUT`.
+
 ## Technology Stack
 
 - **CLI Framework**: [Typer](https://typer.tiangolo.com/) - Modern CLI framework

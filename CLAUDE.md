@@ -8,6 +8,7 @@ Pre-configured cloud-init, Tailscale VPN (enabled by default), and SSH config ma
 - **Never use `pip`** — always use `uv` for all Python operations
 - **Always run `prek run`** before committing (or `prek install` to auto-run on commit)
 - **Keep README.md in sync** when adding commands or features
+- **Run E2E tests before pushing** changes that affect core workflows (create, destroy, SSH config, cloud-init, Tailscale)
 
 ## Quick Commands
 
@@ -26,6 +27,7 @@ dropkit/
 ├── dropkit/           # CLI source (Typer entry point: main.py)
 │   └── templates/     # Jinja2 cloud-init templates
 └── tests/             # pytest tests
+    └── e2e/
 ```
 
 ## Technology Stack
@@ -139,6 +141,20 @@ uv run pytest -v                           # Verbose
 ```
 
 **Coverage**: Minimum 29% enforced via `--cov-fail-under=29` in pyproject.toml.
+
+### E2E Testing
+
+The E2E lifecycle test creates a real droplet, verifies SSH connectivity,
+and destroys it. **Run before pushing changes that affect core workflows**
+(create, destroy, SSH config, cloud-init, Tailscale).
+
+```bash
+./tests/e2e/test_lifecycle.sh
+```
+
+Requires a valid dropkit config (`~/.config/dropkit/config.yaml`).
+Optional environment variables: `DROPLET_NAME`, `DROPLET_REGION`,
+`DROPLET_SIZE`, `DROPLET_IMAGE`, `E2E_SSH_TIMEOUT`.
 
 ## Pydantic Models
 

@@ -1,7 +1,7 @@
-.PHONY: help dev lint format test audit
+.PHONY: help dev lint format test e2e audit
 
 help: ## Show available targets
-	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  %-12s %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z0-9_-]+:.*##' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  %-12s %s\n", $$1, $$2}'
 
 dev: ## Install all dependencies
 	uv sync --all-groups
@@ -14,6 +14,9 @@ format: ## Auto-format code
 
 test: ## Run tests
 	uv run pytest
+
+e2e: ## Run E2E lifecycle test (creates a real droplet)
+	./tests/e2e/test_lifecycle.sh
 
 audit: ## Audit dependencies for vulnerabilities
 	uv run pip-audit
