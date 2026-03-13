@@ -298,7 +298,7 @@ class Config:
         username: str,  # noqa: ARG002 - kept for API compatibility, username derived from DO API
         region: str = "nyc3",
         size: str = "s-2vcpu-4gb",
-        image: str = "ubuntu-25-04-x64",
+        image: str = "ubuntu-25-10-x64",
         ssh_keys: list[str] | None = None,
         ssh_key_ids: list[int] | None = None,
         extra_tags: list[str] | None = None,

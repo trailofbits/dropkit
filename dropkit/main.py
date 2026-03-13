@@ -1714,14 +1714,14 @@ def init(
     if images:
         image = prompt_with_help(
             "Default image",
-            default="ubuntu-25-04-x64",
+            default="ubuntu-25-10-x64",
             display_func=display_images,
             data=images,
         )
     else:
         image = Prompt.ask(
             "[cyan]Default image[/cyan]",
-            default="ubuntu-25-04-x64",
+            default="ubuntu-25-10-x64",
         )
 
     # Prompt for extra tags

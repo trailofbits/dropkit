@@ -34,7 +34,7 @@ def valid_config_dict():
         "defaults": {
             "region": "nyc3",
             "size": "s-2vcpu-4gb",
-            "image": "ubuntu-25-04-x64",
+            "image": "ubuntu-25-10-x64",
             "extra_tags": ["custom-tag"],
         },
         "cloudinit": {
@@ -98,12 +98,12 @@ class TestDefaultsConfig:
         config = DefaultsConfig(
             region="nyc3",
             size="s-2vcpu-4gb",
-            image="ubuntu-25-04-x64",
+            image="ubuntu-25-10-x64",
             extra_tags=["tag1", "tag2"],
         )
         assert config.region == "nyc3"
         assert config.size == "s-2vcpu-4gb"
-        assert config.image == "ubuntu-25-04-x64"
+        assert config.image == "ubuntu-25-10-x64"
         assert config.extra_tags == ["tag1", "tag2"]
 
     def test_empty_region_fails(self):
@@ -112,7 +112,7 @@ class TestDefaultsConfig:
             DefaultsConfig(
                 region="",
                 size="s-2vcpu-4gb",
-                image="ubuntu-25-04-x64",
+                image="ubuntu-25-10-x64",
             )
 
     def test_empty_size_fails(self):
@@ -121,7 +121,7 @@ class TestDefaultsConfig:
             DefaultsConfig(
                 region="nyc3",
                 size="",
-                image="ubuntu-25-04-x64",
+                image="ubuntu-25-10-x64",
             )
 
     def test_empty_image_fails(self):
@@ -138,7 +138,7 @@ class TestDefaultsConfig:
         config = DefaultsConfig(
             region="nyc3",
             size="s-2vcpu-4gb",
-            image="ubuntu-25-04-x64",
+            image="ubuntu-25-10-x64",
             extra_tags=[],
         )
         assert config.extra_tags == []
@@ -148,7 +148,7 @@ class TestDefaultsConfig:
         config = DefaultsConfig(
             region="nyc3",
             size="s-2vcpu-4gb",
-            image="ubuntu-25-04-x64",
+            image="ubuntu-25-10-x64",
         )
         assert config.extra_tags == []
 
@@ -297,7 +297,7 @@ class TestConfigManager:
             username="testuser",
             region="nyc3",
             size="s-2vcpu-4gb",
-            image="ubuntu-25-04-x64",
+            image="ubuntu-25-10-x64",
             ssh_keys=["/path/to/key.pub"],
             ssh_key_ids=[12345],
             extra_tags=["tag1", "tag2"],
@@ -345,7 +345,7 @@ class TestConfigManager:
             username="testuser",
             region="sfo3",
             size="s-1vcpu-1gb",
-            image="ubuntu-25-04-x64",
+            image="ubuntu-25-10-x64",
             ssh_keys=["/path/to/key.pub"],
             ssh_key_ids=[98765],
             extra_tags=["test_tag"],

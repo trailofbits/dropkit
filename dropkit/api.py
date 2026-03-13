@@ -329,7 +329,7 @@ class DigitalOceanAPI:
             name: Droplet name
             region: Region slug (e.g., 'nyc3')
             size: Size slug (e.g., 's-2vcpu-4gb')
-            image: Image slug (e.g., 'ubuntu-25-04-x64')
+            image: Image slug (e.g., 'ubuntu-25-10-x64')
             user_data: Cloud-init user data
             tags: List of tags to apply
             ssh_keys: List of SSH key IDs for root access (optional)
