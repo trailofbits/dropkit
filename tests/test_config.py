@@ -6,6 +6,9 @@ import pytest
 from pydantic import ValidationError
 
 from dropkit.config import (
+    DEFAULT_IMAGE,
+    DEFAULT_REGION,
+    DEFAULT_SIZE,
     CloudInitConfig,
     Config,
     DefaultsConfig,
@@ -32,9 +35,9 @@ def valid_config_dict():
             "api_base": "https://api.digitalocean.com/v2",
         },
         "defaults": {
-            "region": "nyc3",
-            "size": "s-2vcpu-4gb",
-            "image": "ubuntu-25-10-x64",
+            "region": DEFAULT_REGION,
+            "size": DEFAULT_SIZE,
+            "image": DEFAULT_IMAGE,
             "extra_tags": ["custom-tag"],
         },
         "cloudinit": {
@@ -96,14 +99,14 @@ class TestDefaultsConfig:
     def test_valid_config(self):
         """Test valid defaults config."""
         config = DefaultsConfig(
-            region="nyc3",
-            size="s-2vcpu-4gb",
-            image="ubuntu-25-10-x64",
+            region=DEFAULT_REGION,
+            size=DEFAULT_SIZE,
+            image=DEFAULT_IMAGE,
             extra_tags=["tag1", "tag2"],
         )
-        assert config.region == "nyc3"
-        assert config.size == "s-2vcpu-4gb"
-        assert config.image == "ubuntu-25-10-x64"
+        assert config.region == DEFAULT_REGION
+        assert config.size == DEFAULT_SIZE
+        assert config.image == DEFAULT_IMAGE
         assert config.extra_tags == ["tag1", "tag2"]
 
     def test_empty_region_fails(self):
@@ -111,34 +114,34 @@ class TestDefaultsConfig:
         with pytest.raises(ValidationError):
             DefaultsConfig(
                 region="",
-                size="s-2vcpu-4gb",
-                image="ubuntu-25-10-x64",
+                size=DEFAULT_SIZE,
+                image=DEFAULT_IMAGE,
             )
 
     def test_empty_size_fails(self):
         """Test that empty size fails validation."""
         with pytest.raises(ValidationError):
             DefaultsConfig(
-                region="nyc3",
+                region=DEFAULT_REGION,
                 size="",
-                image="ubuntu-25-10-x64",
+                image=DEFAULT_IMAGE,
             )
 
     def test_empty_image_fails(self):
         """Test that empty image fails validation."""
         with pytest.raises(ValidationError):
             DefaultsConfig(
-                region="nyc3",
-                size="s-2vcpu-4gb",
+                region=DEFAULT_REGION,
+                size=DEFAULT_SIZE,
                 image="",
             )
 
     def test_empty_extra_tags_allowed(self):
         """Test that empty extra_tags list is allowed."""
         config = DefaultsConfig(
-            region="nyc3",
-            size="s-2vcpu-4gb",
-            image="ubuntu-25-10-x64",
+            region=DEFAULT_REGION,
+            size=DEFAULT_SIZE,
+            image=DEFAULT_IMAGE,
             extra_tags=[],
         )
         assert config.extra_tags == []
@@ -146,9 +149,9 @@ class TestDefaultsConfig:
     def test_missing_extra_tags_defaults_to_empty(self):
         """Test that missing extra_tags defaults to empty list."""
         config = DefaultsConfig(
-            region="nyc3",
-            size="s-2vcpu-4gb",
-            image="ubuntu-25-10-x64",
+            region=DEFAULT_REGION,
+            size=DEFAULT_SIZE,
+            image=DEFAULT_IMAGE,
         )
         assert config.extra_tags == []
 
@@ -236,7 +239,7 @@ class TestDropkitConfig:
         """Test valid full configuration."""
         config = DropkitConfig(**valid_config_dict)
         assert config.digitalocean.token == "dop_v1_test_token_12345"
-        assert config.defaults.region == "nyc3"
+        assert config.defaults.region == DEFAULT_REGION
         assert config.cloudinit.ssh_keys[0] == "/home/user/.ssh/id_ed25519.pub"
         assert config.ssh.auto_update is True
 
@@ -295,9 +298,9 @@ class TestConfigManager:
         config.create_default_config(
             token="test_token",
             username="testuser",
-            region="nyc3",
-            size="s-2vcpu-4gb",
-            image="ubuntu-25-10-x64",
+            region=DEFAULT_REGION,
+            size=DEFAULT_SIZE,
+            image=DEFAULT_IMAGE,
             ssh_keys=["/path/to/key.pub"],
             ssh_key_ids=[12345],
             extra_tags=["tag1", "tag2"],
@@ -305,7 +308,7 @@ class TestConfigManager:
 
         # Should be able to access config now
         assert config.config.digitalocean.token == "test_token"
-        assert config.config.defaults.region == "nyc3"
+        assert config.config.defaults.region == DEFAULT_REGION
         assert config.config.defaults.extra_tags == ["tag1", "tag2"]
         assert config.config.cloudinit.ssh_key_ids == [12345]
 
@@ -345,7 +348,7 @@ class TestConfigManager:
             username="testuser",
             region="sfo3",
             size="s-1vcpu-1gb",
-            image="ubuntu-25-10-x64",
+            image=DEFAULT_IMAGE,
             ssh_keys=["/path/to/key.pub"],
             ssh_key_ids=[98765],
             extra_tags=["test_tag"],
