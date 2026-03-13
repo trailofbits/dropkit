@@ -9,6 +9,11 @@ import yaml
 from cryptography.hazmat.primitives import serialization
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+# Default slugs for droplet creation
+DEFAULT_REGION = "nyc3"
+DEFAULT_SIZE = "s-2vcpu-4gb"
+DEFAULT_IMAGE = "ubuntu-25-10-x64"
+
 
 class DigitalOceanConfig(BaseModel):
     """DigitalOcean API configuration."""
@@ -296,9 +301,9 @@ class Config:
         self,
         token: str,
         username: str,  # noqa: ARG002 - kept for API compatibility, username derived from DO API
-        region: str = "nyc3",
-        size: str = "s-2vcpu-4gb",
-        image: str = "ubuntu-25-04-x64",
+        region: str = DEFAULT_REGION,
+        size: str = DEFAULT_SIZE,
+        image: str = DEFAULT_IMAGE,
         ssh_keys: list[str] | None = None,
         ssh_key_ids: list[int] | None = None,
         extra_tags: list[str] | None = None,

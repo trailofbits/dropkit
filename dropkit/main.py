@@ -18,7 +18,7 @@ from rich.table import Table
 
 from dropkit.api import DigitalOceanAPI, DigitalOceanAPIError
 from dropkit.cloudinit import render_cloud_init
-from dropkit.config import Config, DropkitConfig
+from dropkit.config import DEFAULT_IMAGE, DEFAULT_REGION, DEFAULT_SIZE, Config, DropkitConfig
 from dropkit.lock import requires_lock
 from dropkit.ssh_config import (
     add_ssh_host,
@@ -1686,42 +1686,42 @@ def init(
     if regions:
         region = prompt_with_help(
             "Default region",
-            default="nyc3",
+            default=DEFAULT_REGION,
             display_func=display_regions,
             data=regions,
         )
     else:
         region = Prompt.ask(
             "[cyan]Default region[/cyan]",
-            default="nyc3",
+            default=DEFAULT_REGION,
         )
 
     # Prompt for default size
     if sizes:
         size = prompt_with_help(
             "Default droplet size",
-            default="s-2vcpu-4gb",
+            default=DEFAULT_SIZE,
             display_func=display_sizes,
             data=sizes,
         )
     else:
         size = Prompt.ask(
             "[cyan]Default droplet size[/cyan]",
-            default="s-2vcpu-4gb",
+            default=DEFAULT_SIZE,
         )
 
     # Prompt for default image
     if images:
         image = prompt_with_help(
             "Default image",
-            default="ubuntu-25-04-x64",
+            default=DEFAULT_IMAGE,
             display_func=display_images,
             data=images,
         )
     else:
         image = Prompt.ask(
             "[cyan]Default image[/cyan]",
-            default="ubuntu-25-04-x64",
+            default=DEFAULT_IMAGE,
         )
 
     # Prompt for extra tags
