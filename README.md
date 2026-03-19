@@ -233,6 +233,7 @@ The E2E lifecycle test creates a real droplet, verifies SSH connectivity,
 and destroys it. It runs automatically as a `pre-push` hook via prek.
 
 ```bash
+prek install -t pre-push               # One-time setup
 ./tests/e2e/test_lifecycle.sh          # Run manually
 prek run --hook-stage pre-push         # Run via prek
 ```

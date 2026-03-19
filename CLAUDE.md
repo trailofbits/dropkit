@@ -15,6 +15,7 @@ Pre-configured cloud-init, Tailscale VPN (enabled by default), and SSH config ma
 ```bash
 uv sync                      # Install dependencies
 prek install                 # Set up pre-commit hooks (one-time)
+prek install -t pre-push    # Set up pre-push hooks (E2E test)
 prek run                     # Run all checks (ruff, ty, shellcheck, etc.)
 uv run pytest                # Run tests
 uv run dropkit --help        # CLI help
