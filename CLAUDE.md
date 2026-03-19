@@ -8,14 +8,14 @@ Pre-configured cloud-init, Tailscale VPN (enabled by default), and SSH config ma
 - **Never use `pip`** — always use `uv` for all Python operations
 - **Always run `prek run`** before committing (or `prek install` to auto-run on commit)
 - **Keep README.md in sync** when adding commands or features
-- **E2E tests run automatically on `pre-push`** via prek — they create a real droplet with hardcoded defaults
+- **Run E2E tests before pushing** with `prek run --stage manual` — creates a real droplet with hardcoded defaults
 
 ## Quick Commands
 
 ```bash
 uv sync                      # Install dependencies
 prek install                 # Set up pre-commit hooks (one-time)
-prek install -t pre-push    # Set up pre-push hooks (E2E test)
+prek run --stage manual      # Run E2E test (before pushing)
 prek run                     # Run all checks (ruff, ty, shellcheck, etc.)
 uv run pytest                # Run tests
 uv run dropkit --help        # CLI help
@@ -146,13 +146,13 @@ uv run pytest -v                           # Verbose
 ### E2E Testing
 
 The E2E lifecycle test creates a real droplet, verifies SSH connectivity,
-and destroys it. It runs automatically as a **pre-push hook** via prek,
-using hardcoded defaults (nyc3, s-1vcpu-1gb, ubuntu-24-04-x64) to avoid
-dependence on user config values.
+and destroys it. Registered as a prek `manual` stage hook — run before
+pushing changes that affect core workflows. Uses hardcoded defaults
+(nyc3, s-1vcpu-1gb, ubuntu-24-04-x64) to avoid dependence on user config.
 
 ```bash
-./tests/e2e/test_lifecycle.sh          # Run manually
-prek run --hook-stage pre-push         # Run via prek
+./tests/e2e/test_lifecycle.sh          # Run directly
+prek run --stage manual                # Run via prek
 ```
 
 Requires a valid dropkit config (`~/.config/dropkit/config.yaml`) with a

@@ -230,12 +230,12 @@ uv run pytest -k "pattern"   # Filter by name
 ### Running E2E Tests
 
 The E2E lifecycle test creates a real droplet, verifies SSH connectivity,
-and destroys it. It runs automatically as a `pre-push` hook via prek.
+and destroys it. Registered as a prek `manual` stage hook — run before
+pushing changes that affect core workflows.
 
 ```bash
-prek install -t pre-push               # One-time setup
-./tests/e2e/test_lifecycle.sh          # Run manually
-prek run --hook-stage pre-push         # Run via prek
+./tests/e2e/test_lifecycle.sh          # Run directly
+prek run --stage manual                # Run via prek
 ```
 
 Requires a valid dropkit config (`~/.config/dropkit/config.yaml`) with a
