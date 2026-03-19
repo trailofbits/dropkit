@@ -1,4 +1,5 @@
 #cloud-config
+# Warning: This whole file will be evaluated by Jinja. Escape any special literals
 
 # Update and upgrade system packages
 package_update: true

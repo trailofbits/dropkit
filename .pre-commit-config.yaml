@@ -34,6 +34,16 @@ repos:
         types: [python]
         pass_filenames: false
 
+  # Jinja2 template validation
+  - repo: local
+    hooks:
+      - id: jinja2-check
+        name: jinja2 template syntax
+        entry: uv run python -c "import sys; from jinja2 import Template; [Template(open(f).read()) for f in sys.argv[1:]]"
+        language: system
+        files: ^dropkit/templates/.*\.yaml$
+        types: [file]
+
   # Shell script linting
   - repo: https://github.com/koalaman/shellcheck-precommit
     rev: v0.10.0
