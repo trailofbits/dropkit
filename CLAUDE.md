@@ -8,7 +8,7 @@ Pre-configured cloud-init, Tailscale VPN (enabled by default), and SSH config ma
 - **Never use `pip`** — always use `uv` for all Python operations
 - **Always run `prek run`** before committing (or `prek install` to auto-run on commit)
 - **Keep README.md in sync** when adding commands or features
-- **Run E2E tests before pushing** changes that affect core workflows (create, destroy, SSH config, cloud-init, Tailscale)
+- **E2E tests run automatically on `pre-push`** via prek — they create a real droplet with hardcoded defaults
 
 ## Quick Commands
 
@@ -145,15 +145,17 @@ uv run pytest -v                           # Verbose
 ### E2E Testing
 
 The E2E lifecycle test creates a real droplet, verifies SSH connectivity,
-and destroys it. **Run before pushing changes that affect core workflows**
-(create, destroy, SSH config, cloud-init, Tailscale).
+and destroys it. It runs automatically as a **pre-push hook** via prek,
+using hardcoded defaults (nyc3, s-1vcpu-1gb, ubuntu-24-04-x64) to avoid
+dependence on user config values.
 
 ```bash
-./tests/e2e/test_lifecycle.sh
+./tests/e2e/test_lifecycle.sh          # Run manually
+prek run --hook-stage pre-push         # Run via prek
 ```
 
-Requires a valid dropkit config (`~/.config/dropkit/config.yaml`).
-Optional environment variables: `DROPLET_NAME`, `DROPLET_REGION`,
+Requires a valid dropkit config (`~/.config/dropkit/config.yaml`) with a
+DigitalOcean API token. Optional overrides: `DROPLET_NAME`, `DROPLET_REGION`,
 `DROPLET_SIZE`, `DROPLET_IMAGE`, `E2E_SSH_TIMEOUT`.
 
 ## Pydantic Models

@@ -40,3 +40,14 @@ repos:
     hooks:
       - id: shellcheck
         args: [--severity=error]
+
+  # E2E lifecycle test (creates a real droplet, requires valid config)
+  - repo: local
+    hooks:
+      - id: e2e-lifecycle
+        name: E2E lifecycle test
+        entry: ./tests/e2e/test_lifecycle.sh
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]

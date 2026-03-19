@@ -8,11 +8,11 @@
 # Usage:
 #   ./tests/e2e/test_lifecycle.sh
 #
-# Environment variables (all optional, uses config defaults if unset):
+# Environment variables (all optional):
 #   DROPLET_NAME     — Name for the test droplet (default: e2e-<timestamp>)
-#   DROPLET_REGION   — Region slug (default: from config)
-#   DROPLET_SIZE     — Size slug (default: from config)
-#   DROPLET_IMAGE    — Image slug (default: from config)
+#   DROPLET_REGION   — Region slug (default: nyc3)
+#   DROPLET_SIZE     — Size slug (default: s-1vcpu-1gb)
+#   DROPLET_IMAGE    — Image slug (default: ubuntu-24-04-x64)
 #   E2E_SSH_TIMEOUT  — SSH connect timeout in seconds (default: 10)
 
 set -euo pipefail
@@ -27,19 +27,10 @@ SSH_CONFIG="${HOME}/.ssh/config"
 SSH_TIMEOUT="${E2E_SSH_TIMEOUT:-10}"
 SSH_OPTS="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=${SSH_TIMEOUT} -o BatchMode=yes"
 
-# Read defaults from dropkit config if env vars not set
-DROPKIT_CONFIG="${HOME}/.config/dropkit/config.yaml"
-if [[ -z "${DROPLET_REGION:-}" || -z "${DROPLET_SIZE:-}" || -z "${DROPLET_IMAGE:-}" ]]; then
-    if [[ ! -f "${DROPKIT_CONFIG}" ]]; then
-        echo "Error: ${DROPKIT_CONFIG} not found and DROPLET_REGION/SIZE/IMAGE not all set"
-        exit 1
-    fi
-    # Parse YAML defaults (simple grep — avoids adding a yq dependency)
-    _cfg_val() { grep "^  $1:" "${DROPKIT_CONFIG}" | head -1 | awk '{print $2}' | tr -d '"'"'"; }
-    DROPLET_REGION="${DROPLET_REGION:-$(_cfg_val region)}"
-    DROPLET_SIZE="${DROPLET_SIZE:-$(_cfg_val size)}"
-    DROPLET_IMAGE="${DROPLET_IMAGE:-$(_cfg_val image)}"
-fi
+# Hardcoded defaults — tests should not depend on user config
+DROPLET_REGION="${DROPLET_REGION:-nyc3}"
+DROPLET_SIZE="${DROPLET_SIZE:-s-1vcpu-1gb}"
+DROPLET_IMAGE="${DROPLET_IMAGE:-ubuntu-24-04-x64}"
 
 CREATE_FLAGS=(
     --no-tailscale --verbose
