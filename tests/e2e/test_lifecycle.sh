@@ -96,10 +96,11 @@ assert_file_not_contains() {
 }
 
 ssh_run() {
-    # shellcheck disable=SC2086
+    # shellcheck disable=SC2086,SC2029
     ssh ${SSH_OPTS} "${SSH_HOSTNAME}" "$@" 2>&1
 }
 
+# shellcheck disable=SC2329  # invoked via trap
 cleanup() {
     if [[ "${DROPLET_CREATED}" == "true" ]]; then
         echo ""
