@@ -2786,6 +2786,32 @@ def destroy(droplet_name: str = typer.Argument(..., autocompletion=complete_drop
             tailscale_ip=droplet_tailscale_ip,
         )
 
+        # Check for leftover hibernation snapshot
+        snapshot_name = get_snapshot_name(droplet_name)
+        user_tag = get_user_tag(username)
+        snapshot = api.get_snapshot_by_name(snapshot_name, tag=user_tag)
+
+        if snapshot:
+            snapshot_id_str = snapshot.get("id")
+            if snapshot_id_str:
+                snapshot_id = int(snapshot_id_str)
+                size_gb = snapshot.get("size_gigabytes", 0)
+                console.print()
+                console.print(
+                    f"[yellow]Found leftover hibernation snapshot:[/yellow] "
+                    f"{snapshot_name} ({size_gb} GB)"
+                )
+                delete_snap = Prompt.ask(
+                    "[yellow]Delete this snapshot too?[/yellow]",
+                    choices=["yes", "no"],
+                    default="yes",
+                )
+                if delete_snap == "yes":
+                    api.delete_snapshot(snapshot_id)
+                    console.print("[green]✓[/green] Snapshot deleted")
+                else:
+                    console.print("[dim]Snapshot kept[/dim]")
+
         console.print()
         console.print("[bold green]Droplet successfully destroyed[/bold green]")
 
