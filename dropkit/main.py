@@ -3528,15 +3528,38 @@ def resize(
                 "[dim]Note: Disk will NOT be resized. You can resize it later, but it's permanent.[/dim]"
             )
 
-        # Confirmation
+        # Confirmation — offer "nodisk" escape hatch when disk resize is
+        # planned and disk size would increase.  This supports the common
+        # use case of temporarily scaling up CPU/RAM (e.g. for a heavy
+        # build or benchmark) and scaling back down later, which requires
+        # NOT resizing the disk (disk resize is permanent/irreversible and
+        # prevents future downsizing).
         console.print()
-        confirm = Prompt.ask(
-            "[yellow]Are you sure you want to resize this droplet?[/yellow]",
-            choices=["yes", "no"],
-            default="no",
-        )
+        show_nodisk_option = disk and isinstance(disk_diff, int) and disk_diff > 0
 
-        if confirm != "yes":
+        if show_nodisk_option:
+            console.print(
+                "[dim]Tip: Answer 'nodisk' to skip disk resize "
+                "(keeps resize reversible for temporary scale-ups)[/dim]"
+            )
+            confirm = Prompt.ask(
+                "[yellow]Are you sure you want to resize this droplet?[/yellow]",
+                choices=["yes", "nodisk", "no"],
+                default="no",
+            )
+        else:
+            confirm = Prompt.ask(
+                "[yellow]Are you sure you want to resize this droplet?[/yellow]",
+                choices=["yes", "no"],
+                default="no",
+            )
+
+        if confirm == "nodisk":
+            disk = False
+            console.print(
+                "[dim]Disk resize skipped — CPU/RAM only (you can resize back down later)[/dim]"
+            )
+        elif confirm != "yes":
             console.print("[dim]Cancelled.[/dim]")
             raise typer.Exit(0)
 
@@ -3562,9 +3585,37 @@ def resize(
             api.wait_for_action_complete(action_id, timeout=600)  # 10 minutes
 
         console.print("[green]✓[/green] Resize completed successfully")
+
+        # Power the droplet back on — DigitalOcean leaves it powered off
+        # after resize (no auto-power-on API flag exists).  Since the user
+        # almost certainly wants their droplet running, we power it on
+        # automatically instead of leaving them to discover it's off.
+        console.print()
+        console.print("[dim]Powering on droplet...[/dim]")
+
+        power_action = api.power_on_droplet(droplet_id)
+        power_action_id = power_action.get("id")
+
+        if not power_action_id:
+            console.print(
+                "[yellow]Warning: Could not get power-on action ID. "
+                f"You may need to run: dropkit on {droplet_name}[/yellow]"
+            )
+        else:
+            console.print(
+                f"[green]✓[/green] Power on action started (ID: [cyan]{power_action_id}[/cyan])"
+            )
+            console.print("[dim]Waiting for droplet to power on...[/dim]")
+
+            with console.status("[cyan]Powering on...[/cyan]"):
+                api.wait_for_action_complete(power_action_id, timeout=120)
+
+            console.print("[green]✓[/green] Droplet powered on successfully")
+
         console.print()
         console.print(
-            f"[bold green]Droplet {droplet_name} has been resized to {new_size_slug}[/bold green]"
+            f"[bold green]Droplet {droplet_name} has been resized to "
+            f"{new_size_slug} and is now active[/bold green]"
         )
 
     except DigitalOceanAPIError as e:
