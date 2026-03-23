@@ -2804,7 +2804,7 @@ def destroy(droplet_name: str = typer.Argument(..., autocompletion=complete_drop
                 delete_snap = Prompt.ask(
                     "[yellow]Delete this snapshot too?[/yellow]",
                     choices=["yes", "no"],
-                    default="yes",
+                    default="no",
                 )
                 if delete_snap == "yes":
                     api.delete_snapshot(snapshot_id)
