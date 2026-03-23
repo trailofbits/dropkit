@@ -1861,6 +1861,11 @@ def create(
         help="Project name or ID to assign droplet to",
         autocompletion=complete_project_name,
     ),
+    from_snapshot: int | None = typer.Option(
+        None,
+        "--from-snapshot",
+        help="Create from snapshot ID instead of base image (skips cloud-init)",
+    ),
     no_tailscale: bool = typer.Option(
         False, "--no-tailscale", help="Disable Tailscale VPN setup for this droplet"
     ),
@@ -1871,6 +1876,10 @@ def create(
 
     This will create a droplet with the specified name, applying your cloud-init
     template and automatically adding an SSH config entry.
+
+    Use --from-snapshot to create from an existing snapshot instead of a base
+    image.  This skips cloud-init (the snapshot is already configured) and is
+    useful for cloning a golden image into multiple identical droplets.
     """
     # Load configuration
     config_manager = Config()
@@ -1931,8 +1940,13 @@ def create(
             console.print(f"[dim]Using default size: {config.defaults.size}[/dim]")
             size = config.defaults.size
 
-    # Get image (interactive if not provided)
-    if image is None:
+    # --from-snapshot and --image are mutually exclusive
+    if from_snapshot is not None and image is not None:
+        console.print("[red]Error: --from-snapshot and --image are mutually exclusive[/red]")
+        raise typer.Exit(1)
+
+    # Get image (interactive if not provided) — skip when creating from snapshot
+    if from_snapshot is None and image is None:
         try:
             available_images = api.get_available_images()
             image = prompt_with_help(
@@ -1947,7 +1961,10 @@ def create(
             image = config.defaults.image
 
     # Type guard - values are guaranteed non-None after interactive prompts
-    if name is None or region is None or size is None or image is None:
+    if name is None or region is None or size is None:
+        console.print("[red]Error: Missing required parameters[/red]")
+        raise typer.Exit(1)
+    if from_snapshot is None and image is None:
         console.print("[red]Error: Missing required parameters[/red]")
         raise typer.Exit(1)
 
@@ -2066,7 +2083,10 @@ def create(
 
     table.add_row("Region:", region)
     table.add_row("Size:", size)
-    table.add_row("Image:", image)
+    if from_snapshot is not None:
+        table.add_row("Snapshot:", str(from_snapshot))
+    else:
+        table.add_row("Image:", image or "")
     table.add_row("User:", username)
     table.add_row("Tags:", ", ".join(tags_list))
     if project_id and project_name:
@@ -2078,38 +2098,58 @@ def create(
     # Determine if Tailscale should be enabled
     tailscale_enabled = not no_tailscale and config.tailscale.enabled
 
-    # Render cloud-init
+    # Create droplet — two paths: from snapshot (no cloud-init) or from
+    # base image (with cloud-init).  Snapshots are already configured, so
+    # re-running cloud-init would cause problems (user creation fails,
+    # .zshrc overwritten, unconditional reboot).
     try:
-        console.print("[dim]Rendering cloud-init template...[/dim]")
-        user_data = render_cloud_init(
-            template_path, username, full_name, email, ssh_keys, tailscale_enabled
-        )
-
-        if verbose:
-            console.print("\n[dim][DEBUG] Rendered cloud-init template:[/dim]")
-            console.print("[dim]" + "=" * 60 + "[/dim]")
-            console.print(f"[dim]{user_data}[/dim]")
-            console.print("[dim]" + "=" * 60 + "[/dim]\n")
-    except Exception as e:
-        console.print(f"[red]Error rendering cloud-init: {e}[/red]")
-        raise typer.Exit(1)
-
-    # Create droplet
-    try:
-        if verbose:
-            console.print(
-                f"[dim][DEBUG] Creating droplet with API endpoint: {config.digitalocean.api_base}/droplets[/dim]"
+        if from_snapshot is not None:
+            # Snapshot path — skip cloud-init entirely
+            console.print("[dim]Creating droplet from snapshot...[/dim]")
+            if verbose:
+                console.print(
+                    f"[dim][DEBUG] Snapshot ID: {from_snapshot}, no cloud-init will be sent[/dim]"
+                )
+            droplet = api.create_droplet_from_snapshot(
+                name=name,
+                region=region,
+                size=size,
+                snapshot_id=from_snapshot,
+                tags=tags_list,
+                ssh_keys=config.cloudinit.ssh_key_ids,
             )
-        console.print("[dim]Creating droplet via API...[/dim]")
-        droplet = api.create_droplet(
-            name=name,
-            region=region,
-            size=size,
-            image=image,
-            user_data=user_data,
-            tags=tags_list,
-            ssh_keys=config.cloudinit.ssh_key_ids,
-        )
+        else:
+            # Base image path — render and send cloud-init
+            try:
+                console.print("[dim]Rendering cloud-init template...[/dim]")
+                user_data = render_cloud_init(
+                    template_path, username, full_name, email, ssh_keys, tailscale_enabled
+                )
+
+                if verbose:
+                    console.print("\n[dim][DEBUG] Rendered cloud-init template:[/dim]")
+                    console.print("[dim]" + "=" * 60 + "[/dim]")
+                    console.print(f"[dim]{user_data}[/dim]")
+                    console.print("[dim]" + "=" * 60 + "[/dim]\n")
+            except Exception as e:
+                console.print(f"[red]Error rendering cloud-init: {e}[/red]")
+                raise typer.Exit(1)
+
+            if verbose:
+                console.print(
+                    f"[dim][DEBUG] Creating droplet with API endpoint: "
+                    f"{config.digitalocean.api_base}/droplets[/dim]"
+                )
+            console.print("[dim]Creating droplet via API...[/dim]")
+            droplet = api.create_droplet(
+                name=name,
+                region=region,
+                size=size,
+                image=image or "",
+                user_data=user_data,
+                tags=tags_list,
+                ssh_keys=config.cloudinit.ssh_key_ids,
+            )
 
         droplet_id = droplet.get("id")
         if not droplet_id:
@@ -2198,12 +2238,18 @@ def create(
                 except Exception as e:
                     console.print(f"[yellow]⚠[/yellow] Could not update SSH config: {e}")
 
-            # Wait for cloud-init to complete using helper function
-            cloud_init_done, cloud_init_error = wait_for_cloud_init(ssh_hostname, verbose)
-
-            # Tailscale setup (if enabled and cloud-init succeeded)
-            if tailscale_enabled and cloud_init_done:
-                tailscale_ip = setup_tailscale(ssh_hostname, username, config, verbose)
+            if from_snapshot is not None:
+                # Snapshot-based: no cloud-init was sent, skip monitoring.
+                # The snapshot is already fully configured.
+                cloud_init_done = True
+                cloud_init_error = False
+                if tailscale_enabled:
+                    tailscale_ip = setup_tailscale(ssh_hostname, username, config, verbose)
+            else:
+                # Base image: wait for cloud-init to complete
+                cloud_init_done, cloud_init_error = wait_for_cloud_init(ssh_hostname, verbose)
+                if tailscale_enabled and cloud_init_done:
+                    tailscale_ip = setup_tailscale(ssh_hostname, username, config, verbose)
 
         # Show summary based on cloud-init and Tailscale status
         console.print()
