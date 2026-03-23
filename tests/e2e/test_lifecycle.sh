@@ -198,7 +198,7 @@ log "Remote disk:"
 echo "${df_output}" | while IFS= read -r line; do log "  ${line}"; done
 assert "df reports a filesystem" bash -c "[[ '${df_output}' == */* ]]"
 
-# Cloud-init final status (parse JSON regardless of exit code per CLAUDE.md)
+# Cloud-init final status
 cloud_init_output=$(ssh_run "cloud-init status --format=json" || true)
 log "Cloud-init status: ${cloud_init_output}"
 assert "Cloud-init reports done" \
