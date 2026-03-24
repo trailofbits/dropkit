@@ -11,6 +11,7 @@ from dropkit.main import (
     _resize_hibernated_snapshot,
     add_temporary_ssh_rule,
     build_droplet_tags,
+    build_wake_user_data,
     complete_droplet_or_snapshot_name,
     find_snapshot_action,
     get_droplet_name_from_snapshot,
@@ -19,6 +20,7 @@ from dropkit.main import (
     get_user_tag,
     is_droplet_tailscale_locked,
     prepare_for_hibernate,
+    wait_for_ssh,
 )
 
 
@@ -548,3 +550,66 @@ class TestCompleteDropletOrSnapshotName:
         """Test that live droplet names appear before snapshot names."""
         result = complete_droplet_or_snapshot_name("")
         assert result.index("live-vm") < result.index("snap-vm")
+
+
+class TestBuildWakeUserData:
+    """Tests for build_wake_user_data function."""
+
+    def test_returns_script_when_tailscale_locked(self):
+        """Test that a cloud-init script is returned for Tailscale-locked snapshots."""
+        result = build_wake_user_data(was_tailscale_locked=True)
+        assert result is not None
+        assert result.startswith("#!/bin/bash\n")
+        assert "ufw allow in on eth0 to any port 22" in result
+
+    def test_returns_none_when_not_tailscale_locked(self):
+        """Test that None is returned when snapshot was not Tailscale-locked."""
+        result = build_wake_user_data(was_tailscale_locked=False)
+        assert result is None
+
+
+class TestWaitForSsh:
+    """Tests for wait_for_ssh function."""
+
+    @patch("dropkit.main.subprocess.run")
+    @patch("dropkit.main.time.monotonic")
+    @patch("dropkit.main.time.sleep")
+    def test_returns_true_on_immediate_success(self, mock_sleep, mock_monotonic, mock_run):
+        """Test that wait_for_ssh returns True when SSH is immediately reachable."""
+        mock_monotonic.side_effect = [0, 0]  # start, first check
+        mock_run.return_value = MagicMock(returncode=0)
+        assert wait_for_ssh("dropkit.test", timeout=10) is True
+
+    @patch("dropkit.main.subprocess.run")
+    @patch("dropkit.main.time.monotonic")
+    @patch("dropkit.main.time.sleep")
+    def test_returns_true_after_retries(self, mock_sleep, mock_monotonic, mock_run):
+        """Test that wait_for_ssh retries and succeeds on second attempt."""
+        mock_monotonic.side_effect = [0, 0, 5, 5]  # start, fail check, sleep check, success check
+        mock_run.side_effect = [
+            MagicMock(returncode=255),  # first attempt fails
+            MagicMock(returncode=0),  # second attempt succeeds
+        ]
+        assert wait_for_ssh("dropkit.test", timeout=60) is True
+
+    @patch("dropkit.main.subprocess.run")
+    @patch("dropkit.main.time.monotonic")
+    @patch("dropkit.main.time.sleep")
+    def test_returns_false_on_timeout(self, mock_sleep, mock_monotonic, mock_run):
+        """Test that wait_for_ssh returns False when timeout is exceeded."""
+        # deadline calc, while check, remaining check, while check (past deadline)
+        mock_monotonic.side_effect = [0, 0, 5, 61]
+        mock_run.return_value = MagicMock(returncode=255)
+        assert wait_for_ssh("dropkit.test", timeout=60) is False
+
+    @patch("dropkit.main.subprocess.run")
+    @patch("dropkit.main.time.monotonic")
+    @patch("dropkit.main.time.sleep")
+    def test_handles_timeout_exception(self, mock_sleep, mock_monotonic, mock_run):
+        """Test that subprocess.TimeoutExpired is caught and retried."""
+        import subprocess
+
+        # deadline calc, while check, remaining check, while check (past deadline)
+        mock_monotonic.side_effect = [0, 0, 5, 61]
+        mock_run.side_effect = subprocess.TimeoutExpired("ssh", 10)
+        assert wait_for_ssh("dropkit.test", timeout=60) is False
