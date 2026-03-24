@@ -3334,11 +3334,12 @@ def resize(
         current_table.add_column(style="dim")
         current_table.add_column(style="white")
 
-        current_vcpus = current_size_info.get("vcpus", "N/A")
-        current_memory = current_size_info.get("memory", "N/A")
-        # Use the droplet's actual disk, not the size spec's disk.
-        # After a --no-disk resize, the size spec says 80 GB (what
-        # s-2vcpu-4gb offers) while the actual disk is still 25 GB.
+        # Use the droplet's actual resource values, not the size spec's.
+        # After a --no-disk resize, the size spec reflects the new tier
+        # (e.g. 80 GB disk for s-2vcpu-4gb) while the droplet's actual
+        # resources may differ (e.g. still 25 GB disk).
+        current_vcpus = droplet.get("vcpus", current_size_info.get("vcpus", "N/A"))
+        current_memory = droplet.get("memory", current_size_info.get("memory", "N/A"))
         current_disk = droplet.get("disk", current_size_info.get("disk", "N/A"))
         current_price = current_size_info.get("price_monthly", 0)
 
