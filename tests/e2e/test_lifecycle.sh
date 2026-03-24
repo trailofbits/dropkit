@@ -10,9 +10,9 @@
 #
 # Environment variables (all optional):
 #   DROPLET_NAME     — Name for the test droplet (default: e2e-<timestamp>)
-#   DROPLET_REGION   — Region slug (default: nyc3)
-#   DROPLET_SIZE     — Size slug (default: s-1vcpu-1gb)
-#   DROPLET_IMAGE    — Image slug (default: ubuntu-24-04-x64)
+#   DROPLET_REGION   — Region slug (default: random from nyc3, sfo3, lon1)
+#   DROPLET_SIZE     — Size slug (default: random from s-1vcpu-1gb, s-2vcpu-4gb)
+#   DROPLET_IMAGE    — Image slug (default: random from ubuntu-24-04-x64, ubuntu-25-04-x64, ubuntu-25-10-x64)
 #   E2E_SSH_TIMEOUT  — SSH connect timeout in seconds (default: 10)
 
 set -euo pipefail
@@ -27,10 +27,19 @@ SSH_CONFIG="${HOME}/.ssh/config"
 SSH_TIMEOUT="${E2E_SSH_TIMEOUT:-10}"
 SSH_OPTS="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=${SSH_TIMEOUT} -o BatchMode=yes"
 
-# Hardcoded defaults — tests should not depend on user config
-DROPLET_REGION="${DROPLET_REGION:-nyc3}"
-DROPLET_SIZE="${DROPLET_SIZE:-s-1vcpu-1gb}"
-DROPLET_IMAGE="${DROPLET_IMAGE:-ubuntu-24-04-x64}"
+# Randomized defaults — avoid hidden dependencies on specific slugs
+_REGIONS=(nyc3 sfo3 lon1)
+_SIZES=(s-1vcpu-1gb s-2vcpu-4gb)
+_IMAGES=(ubuntu-24-04-x64 ubuntu-25-04-x64 ubuntu-25-10-x64)
+
+_pick() {
+  local -n arr=$1
+  echo "${arr[RANDOM % ${#arr[@]}]}"
+}
+
+DROPLET_REGION="${DROPLET_REGION:-$(_pick _REGIONS)}"
+DROPLET_SIZE="${DROPLET_SIZE:-$(_pick _SIZES)}"
+DROPLET_IMAGE="${DROPLET_IMAGE:-$(_pick _IMAGES)}"
 
 CREATE_FLAGS=(
     --no-tailscale --verbose
