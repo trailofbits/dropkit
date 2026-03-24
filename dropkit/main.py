@@ -1006,10 +1006,13 @@ def add_temporary_ssh_rule(ssh_hostname: str, verbose: bool = False) -> bool:
             if result.stderr:
                 console.print(f"[dim]stderr: {result.stderr}[/dim]")
 
-        return result.returncode == 0
+        if result.returncode != 0:
+            stderr_msg = result.stderr.strip()[:200] if result.stderr else "no error output"
+            console.print(f"[dim]SSH rule command failed (exit {result.returncode}): {stderr_msg}[/dim]")
+            return False
+        return True
     except (subprocess.TimeoutExpired, subprocess.SubprocessError) as e:
-        if verbose:
-            console.print(f"[dim]SSH command failed: {e}[/dim]")
+        console.print(f"[dim]SSH command failed: {e}[/dim]")
         return False
 
 
@@ -1019,7 +1022,7 @@ def prepare_for_hibernate(
     droplet: dict,
     droplet_name: str,
     verbose: bool = False,
-) -> bool:
+) -> bool | None:
     """
     Prepare droplet for hibernation, handling Tailscale lockdown if present.
 
@@ -1035,7 +1038,9 @@ def prepare_for_hibernate(
         verbose: Show debug output
 
     Returns:
-        True if droplet was under Tailscale lockdown, False otherwise
+        True if droplet was under Tailscale lockdown and prepared successfully,
+        False if no Tailscale lockdown detected,
+        None if preparation failed (hibernate should abort).
     """
     if not is_droplet_tailscale_locked(config, droplet_name):
         return False
@@ -1047,13 +1052,11 @@ def prepare_for_hibernate(
     # Add temporary SSH rule via Tailscale connection (must succeed before logout)
     console.print("[dim]Adding temporary SSH rule for eth0...[/dim]")
     if not add_temporary_ssh_rule(ssh_hostname, verbose):
-        # Temp rule failed - abort logout to keep Tailscale connectivity
         console.print(
-            "[yellow]⚠[/yellow] Could not add temporary SSH rule - "
-            "skipping Tailscale logout to maintain connectivity"
+            "[red]Error:[/red] Could not add temporary SSH rule. "
+            "Aborting hibernate to prevent unreachable droplet on wake."
         )
-        # Continue without logout - snapshot will preserve Tailscale state
-        return True
+        return None
 
     console.print("[green]✓[/green] Temporary SSH rule added")
 
@@ -1069,21 +1072,30 @@ def prepare_for_hibernate(
             public_ip = network.get("ip_address")
             break
 
-    if public_ip:
-        console.print(f"[dim]Updating SSH config to public IP: {public_ip}[/dim]")
-        try:
-            username = api.get_username()
-            add_ssh_host(
-                config_path=config.ssh.config_path,
-                host_name=ssh_hostname,
-                hostname=public_ip,
-                user=username,
-                identity_file=config.ssh.identity_file,
-            )
-            console.print("[green]✓[/green] SSH config updated to public IP")
-        except Exception as e:
-            if verbose:
-                console.print(f"[dim]Could not update SSH config: {e}[/dim]")
+    if not public_ip:
+        console.print(
+            "[red]Error:[/red] Could not determine public IP for droplet. "
+            "Aborting hibernate to prevent unreachable droplet on wake."
+        )
+        return None
+
+    console.print(f"[dim]Updating SSH config to public IP: {public_ip}[/dim]")
+    try:
+        username = api.get_username()
+        add_ssh_host(
+            config_path=config.ssh.config_path,
+            host_name=ssh_hostname,
+            hostname=public_ip,
+            user=username,
+            identity_file=config.ssh.identity_file,
+        )
+        console.print("[green]✓[/green] SSH config updated to public IP")
+    except (OSError, DigitalOceanAPIError) as e:
+        console.print(
+            f"[red]Error:[/red] Could not update SSH config to public IP: {e}. "
+            "Aborting hibernate to prevent unreachable droplet on wake."
+        )
+        return None
 
     # Now safe to logout from Tailscale (SSH config points to public IP)
     console.print("[dim]Logging out from Tailscale...[/dim]")
@@ -3805,6 +3817,11 @@ def hibernate(
             # Note: tailscale_locked was already detected earlier
             if tailscale_locked:
                 console.print("[dim]Detected Tailscale lockdown[/dim]")
+                console.print(
+                    "[yellow]Note:[/yellow] Cannot verify temporary SSH rule on a "
+                    "powered-off droplet. If the droplet is unreachable after wake, "
+                    "use the DigitalOcean console to access it."
+                )
 
             _complete_hibernate(
                 api,
@@ -3865,7 +3882,11 @@ def hibernate(
         console.print()
 
         # Step 0: Prepare for hibernate (handle Tailscale lockdown if present)
-        tailscale_locked = prepare_for_hibernate(config, api, droplet, droplet_name, verbose)
+        prepare_result = prepare_for_hibernate(config, api, droplet, droplet_name, verbose)
+        if prepare_result is None:
+            console.print("[dim]Fix the SSH connectivity issue and retry.[/dim]")
+            raise typer.Exit(1)
+        tailscale_locked = prepare_result
 
         # Step 1: Power off if not already off
         if status != "off":
@@ -3940,6 +3961,7 @@ def wake(
         ..., autocompletion=complete_snapshot_name, help="Name of the hibernated droplet to restore"
     ),
     no_tailscale: bool = typer.Option(False, "--no-tailscale", help="Skip Tailscale VPN re-setup"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show verbose debug output"),
 ):
     """
     Wake a hibernated droplet (restore from snapshot).
@@ -4080,7 +4102,7 @@ def wake(
                     identity_file=config.ssh.identity_file,
                 )
                 console.print("[green]✓[/green] SSH config updated")
-            except Exception as e:
+            except OSError as e:
                 console.print(f"[yellow]⚠[/yellow] Could not update SSH config: {e}")
 
         # Handle Tailscale re-setup if the original droplet had Tailscale lockdown
@@ -4107,7 +4129,7 @@ def wake(
                 time.sleep(10)
 
                 # Re-setup Tailscale (clean state from hibernate logout)
-                tailscale_ip = setup_tailscale(ssh_hostname, username, config)
+                tailscale_ip = setup_tailscale(ssh_hostname, username, config, verbose)
 
                 if not tailscale_ip:
                     console.print(

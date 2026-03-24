@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import typer
 
+from dropkit.api import DigitalOceanAPIError
 from dropkit.main import (
     _resize_hibernated_snapshot,
     add_temporary_ssh_rule,
@@ -332,10 +333,10 @@ class TestPrepareForHibernate:
     @patch("dropkit.main.tailscale_logout")
     @patch("dropkit.main.add_temporary_ssh_rule")
     @patch("dropkit.main.add_ssh_host")
-    def test_temp_rule_failure_skips_logout(
+    def test_temp_rule_failure_aborts(
         self, mock_add_ssh_host, mock_add_temp_rule, mock_logout, temp_ssh_config
     ):
-        """Test returns True but skips logout if temp rule fails (safety)."""
+        """Test returns None to abort hibernate if temp rule fails."""
         # Create SSH config with Tailscale IP
         Path(temp_ssh_config).write_text("""Host dropkit.myvm
     HostName 100.80.123.45
@@ -355,11 +356,98 @@ class TestPrepareForHibernate:
 
         result = prepare_for_hibernate(mock_config, mock_api, mock_droplet, "myvm")
 
-        # Should still return True because we detected Tailscale lockdown
-        assert result is True
-        # But logout should NOT be called (safety - need public IP fallback first)
+        # Should return None to signal failure and abort hibernate
+        assert result is None
+        # Logout should NOT be called
         mock_logout.assert_not_called()
-        # And SSH config should NOT be updated (early return)
+        # SSH config should NOT be updated
+        mock_add_ssh_host.assert_not_called()
+
+    @patch("dropkit.main.tailscale_logout")
+    @patch("dropkit.main.add_temporary_ssh_rule")
+    @patch("dropkit.main.add_ssh_host")
+    def test_missing_public_ip_aborts(
+        self, mock_add_ssh_host, mock_add_temp_rule, mock_logout, temp_ssh_config
+    ):
+        """Test returns None to abort hibernate if no public IP found."""
+        Path(temp_ssh_config).write_text("""Host dropkit.myvm
+    HostName 100.80.123.45
+    User ubuntu
+""")
+
+        mock_config = MagicMock()
+        mock_config.ssh.config_path = temp_ssh_config
+        mock_config.ssh.identity_file = "~/.ssh/id_ed25519"
+
+        mock_api = MagicMock()
+
+        # Droplet with no public IPv4 network
+        mock_droplet = {"networks": {"v4": [{"type": "private", "ip_address": "10.0.0.1"}]}}
+
+        mock_add_temp_rule.return_value = True
+
+        result = prepare_for_hibernate(mock_config, mock_api, mock_droplet, "myvm")
+
+        assert result is None
+        mock_logout.assert_not_called()
+        mock_add_ssh_host.assert_not_called()
+
+    @patch("dropkit.main.tailscale_logout")
+    @patch("dropkit.main.add_temporary_ssh_rule")
+    @patch("dropkit.main.add_ssh_host")
+    def test_ssh_config_update_failure_aborts(
+        self, mock_add_ssh_host, mock_add_temp_rule, mock_logout, temp_ssh_config
+    ):
+        """Test returns None to abort hibernate if SSH config update fails."""
+        Path(temp_ssh_config).write_text("""Host dropkit.myvm
+    HostName 100.80.123.45
+    User ubuntu
+""")
+
+        mock_config = MagicMock()
+        mock_config.ssh.config_path = temp_ssh_config
+        mock_config.ssh.identity_file = "~/.ssh/id_ed25519"
+
+        mock_api = MagicMock()
+        mock_api.get_username.return_value = "testuser"
+
+        mock_droplet = {"networks": {"v4": [{"type": "public", "ip_address": "203.0.113.50"}]}}
+
+        mock_add_temp_rule.return_value = True
+        mock_add_ssh_host.side_effect = OSError("Permission denied")
+
+        result = prepare_for_hibernate(mock_config, mock_api, mock_droplet, "myvm")
+
+        assert result is None
+        mock_logout.assert_not_called()
+
+    @patch("dropkit.main.tailscale_logout")
+    @patch("dropkit.main.add_temporary_ssh_rule")
+    @patch("dropkit.main.add_ssh_host")
+    def test_ssh_config_api_failure_aborts(
+        self, mock_add_ssh_host, mock_add_temp_rule, mock_logout, temp_ssh_config
+    ):
+        """Test returns None to abort hibernate if API call for username fails."""
+        Path(temp_ssh_config).write_text("""Host dropkit.myvm
+    HostName 100.80.123.45
+    User ubuntu
+""")
+
+        mock_config = MagicMock()
+        mock_config.ssh.config_path = temp_ssh_config
+        mock_config.ssh.identity_file = "~/.ssh/id_ed25519"
+
+        mock_api = MagicMock()
+        mock_api.get_username.side_effect = DigitalOceanAPIError("API timeout")
+
+        mock_droplet = {"networks": {"v4": [{"type": "public", "ip_address": "203.0.113.50"}]}}
+
+        mock_add_temp_rule.return_value = True
+
+        result = prepare_for_hibernate(mock_config, mock_api, mock_droplet, "myvm")
+
+        assert result is None
+        mock_logout.assert_not_called()
         mock_add_ssh_host.assert_not_called()
 
 
