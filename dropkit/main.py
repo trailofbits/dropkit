@@ -42,6 +42,10 @@ app = typer.Typer(
 )
 console = Console()
 
+# DigitalOcean snapshot storage rate: $0.06/GB/month
+# https://docs.digitalocean.com/products/snapshots/details/pricing/
+SNAPSHOT_COST_PER_GB_MONTHLY = 0.06
+
 
 @app.callback()
 def main_callback():
@@ -2244,7 +2248,9 @@ def create(
 
 @app.command(name="list")
 @app.command(name="ls", hidden=True)
-def list_droplets():
+def list_droplets(
+    cost: bool = typer.Option(True, "--cost/--no-cost", help="Show monthly cost column"),
+):
     """List droplets and hibernated snapshots tagged with owner:<username>."""
     try:
         # Load config and API
@@ -2262,6 +2268,9 @@ def list_droplets():
 
         console.print(f"[dim]Fetching resources with tag: [cyan]{tag_name}[/cyan][/dim]\n")
 
+        # Track total monthly cost across all resources
+        total_monthly_cost = 0.0
+
         # List droplets
         droplets = api.list_droplets(tag_name=tag_name)
 
@@ -2275,6 +2284,8 @@ def list_droplets():
             table.add_column("Tailscale IP", style="magenta", no_wrap=True)
             table.add_column("Region", style="white", no_wrap=True)
             table.add_column("Size", style="white", no_wrap=True)
+            if cost:
+                table.add_column("Cost", style="green", no_wrap=True, justify="right")
             table.add_column("SSH", style="white", no_wrap=True)
 
             # Add rows
@@ -2293,6 +2304,10 @@ def list_droplets():
                 region = droplet.get("region", {}).get("slug", "N/A")
                 size = droplet.get("size_slug", "N/A")
 
+                # Get monthly price from the droplet's size object
+                price_monthly = droplet.get("size", {}).get("price_monthly", 0)
+                total_monthly_cost += float(price_monthly)
+
                 # Check if in SSH config and get Tailscale IP
                 ssh_hostname = get_ssh_hostname(name)
                 in_ssh_config = "✓" if host_exists(config.ssh.config_path, ssh_hostname) else "✗"
@@ -2307,9 +2322,11 @@ def list_droplets():
                 else:
                     status_colored = f"[red]{status}[/red]"
 
-                table.add_row(
-                    name, status_colored, ip_address, tailscale_ip, region, size, in_ssh_config
-                )
+                row = [name, status_colored, ip_address, tailscale_ip, region, size]
+                if cost:
+                    row.append(f"${float(price_monthly):.2f}/mo")
+                row.append(in_ssh_config)
+                table.add_row(*row)
 
             console.print(table)
 
@@ -2325,6 +2342,8 @@ def list_droplets():
             snap_table.add_column("Droplet Size", style="white", no_wrap=True)
             snap_table.add_column("Image Size", style="white", no_wrap=True)
             snap_table.add_column("Region", style="white", no_wrap=True)
+            if cost:
+                snap_table.add_column("Cost", style="green", no_wrap=True, justify="right")
 
             for snapshot in hibernated:
                 snapshot_name = snapshot.get("name", "")
@@ -2338,10 +2357,15 @@ def list_droplets():
                         droplet_size = tag.removeprefix("size:")
 
                 size_gb = snapshot.get("size_gigabytes", 0)
+                snapshot_cost = float(size_gb) * SNAPSHOT_COST_PER_GB_MONTHLY
+                total_monthly_cost += snapshot_cost
                 regions = snapshot.get("regions", [])
                 region = regions[0] if regions else "N/A"
 
-                snap_table.add_row(droplet_name, droplet_size, f"{size_gb} GB", region)
+                row = [droplet_name, droplet_size, f"{size_gb} GB", region]
+                if cost:
+                    row.append(f"${snapshot_cost:.2f}/mo")
+                snap_table.add_row(*row)
 
             console.print(snap_table)
             console.print()
@@ -2355,7 +2379,11 @@ def list_droplets():
                 parts.append(f"{len(droplets)} droplet(s)")
             if hibernated:
                 parts.append(f"{len(hibernated)} hibernated")
-            console.print(f"[dim]Total: {', '.join(parts)}[/dim]")
+            summary = f"[dim]Total: {', '.join(parts)}"
+            if cost:
+                summary += f" — [green]${total_monthly_cost:.2f}/mo[/green]"
+            summary += "[/dim]"
+            console.print(summary)
         else:
             console.print(
                 f"[yellow]No droplets or hibernated snapshots found with tag: {tag_name}[/yellow]"
