@@ -8,12 +8,14 @@ Pre-configured cloud-init, Tailscale VPN (enabled by default), and SSH config ma
 - **Never use `pip`** — always use `uv` for all Python operations
 - **Always run `prek run`** before committing (or `prek install` to auto-run on commit)
 - **Keep README.md in sync** when adding commands or features
+- **Run E2E tests before pushing** with `prek run --stage manual` — creates a real droplet with hardcoded defaults
 
 ## Quick Commands
 
 ```bash
 uv sync                      # Install dependencies
 prek install                 # Set up pre-commit hooks (one-time)
+prek run --stage manual      # Run E2E test (before pushing)
 prek run                     # Run all checks (ruff, ty, shellcheck, etc.)
 uv run pytest                # Run tests
 uv run dropkit --help        # CLI help
@@ -26,6 +28,7 @@ dropkit/
 ├── dropkit/           # CLI source (Typer entry point: main.py)
 │   └── templates/     # Jinja2 cloud-init templates
 └── tests/             # pytest tests
+    └── e2e/
 ```
 
 ## Technology Stack
@@ -139,6 +142,22 @@ uv run pytest -v                           # Verbose
 ```
 
 **Coverage**: Minimum 29% enforced via `--cov-fail-under=29` in pyproject.toml.
+
+### E2E Testing
+
+The E2E lifecycle test creates a real droplet, verifies SSH connectivity,
+and destroys it. Registered as a prek `manual` stage hook — run before
+pushing changes that affect core workflows. Uses hardcoded defaults
+(nyc3, s-1vcpu-1gb, ubuntu-24-04-x64) to avoid dependence on user config.
+
+```bash
+./tests/e2e/test_lifecycle.sh          # Run directly
+prek run --stage manual                # Run via prek
+```
+
+Requires a valid dropkit config (`~/.config/dropkit/config.yaml`) with a
+DigitalOcean API token. Optional overrides: `DROPLET_NAME`, `DROPLET_REGION`,
+`DROPLET_SIZE`, `DROPLET_IMAGE`, `E2E_SSH_TIMEOUT`.
 
 ## Pydantic Models
 

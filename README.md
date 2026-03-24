@@ -217,6 +217,34 @@ The droplet might belong to someone else. List your droplets:
 dropkit list
 ```
 
+## Development
+
+### Running Unit Tests
+
+```bash
+uv run pytest                # All tests
+uv run pytest -v             # Verbose output
+uv run pytest -k "pattern"   # Filter by name
+```
+
+### Running E2E Tests
+
+The E2E lifecycle test creates a real droplet, verifies SSH connectivity,
+and destroys it. Registered as a prek `manual` stage hook — run before
+pushing changes that affect core workflows.
+
+```bash
+./tests/e2e/test_lifecycle.sh          # Run directly
+prek run --stage manual                # Run via prek
+```
+
+Requires a valid dropkit config (`~/.config/dropkit/config.yaml`) with a
+DigitalOcean API token. The test uses hardcoded defaults (nyc3, s-1vcpu-1gb,
+ubuntu-24-04-x64) so user config defaults don't affect test behavior.
+
+Optional environment variable overrides: `DROPLET_NAME`, `DROPLET_REGION`,
+`DROPLET_SIZE`, `DROPLET_IMAGE`, `E2E_SSH_TIMEOUT`.
+
 ## Technology Stack
 
 - **CLI Framework**: [Typer](https://typer.tiangolo.com/) - Modern CLI framework
