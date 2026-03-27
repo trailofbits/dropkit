@@ -51,3 +51,26 @@ def test_default_template_renders_without_tailscale():
     )
     assert "testuser" in rendered
     assert "tailscale.com/install.sh" not in rendered
+
+
+def test_docker_install_uses_distro_detection():
+    """Verify Docker setup detects distro dynamically instead of hardcoding Ubuntu."""
+    content = _load_default_template()
+    template = Template(content)
+    rendered = template.render(
+        username="testuser",
+        full_name="Test User",
+        email="test@example.com",
+        ssh_keys=["ssh-ed25519 AAAAC3... test@host"],
+        tailscale_enabled=True,
+    )
+    # Must not hardcode Ubuntu — should use /etc/os-release for distro detection
+    assert "download.docker.com/linux/ubuntu" not in rendered
+    assert "/etc/os-release" in rendered
+    assert "download.docker.com/linux/$ID" in rendered
+
+    # Docker packages installed via runcmd, not apt sources
+    assert "apt-get install -y docker-ce" in rendered
+
+    # Architecture detected dynamically, not hardcoded amd64
+    assert "dpkg --print-architecture" in rendered

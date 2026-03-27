@@ -6,13 +6,6 @@ package_update: true
 package_upgrade: true
 disable_root_opts: no-port-forwarding,no-agent-forwarding,no-X11-forwarding
 
-apt:
-  sources:
-    docker:
-      keyid: 9DC858229FC7DD38854AE2D88D81803C0EBFCD88
-      keyserver: https://download.docker.com/linux/ubuntu/gpg
-      source: deb [arch=amd64 signed-by=$KEY_FILE] https://download.docker.com/linux/ubuntu $RELEASE stable
-
 # Install required packages
 packages:
   - ufw
@@ -25,11 +18,6 @@ packages:
   - apt-transport-https
   - ca-certificates
   - gnupg
-  - docker-ce
-  - docker-ce-cli
-  - containerd.io
-  - docker-buildx-plugin
-  - docker-compose-plugin
 
 users:
   - name: {{ username }}
@@ -79,6 +67,16 @@ runcmd:
   - ufw allow OpenSSH
   - ufw limit ssh
   - ufw --force enable
+
+  # Install Docker from official repo (works on both Ubuntu and Debian)
+  - |
+    . /etc/os-release
+    install -m 0755 -d /etc/apt/keyrings
+    curl -fsSL "https://download.docker.com/linux/$ID/gpg" -o /etc/apt/keyrings/docker.asc
+    chmod a+r /etc/apt/keyrings/docker.asc
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/$ID $(. /etc/os-release && echo "$VERSION_CODENAME") stable" > /etc/apt/sources.list.d/docker.list
+    apt-get update
+    apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
   {% if tailscale_enabled %}
   # Install Tailscale via official script (daemon only, authentication handled by dropkit)
