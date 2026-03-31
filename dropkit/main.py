@@ -3291,8 +3291,8 @@ def rename(
 def resize(
     droplet_name: str = typer.Argument(..., autocompletion=complete_droplet_or_snapshot_name),
     size: str | None = typer.Option(None, "--size", "-s", help="New size slug (e.g., s-4vcpu-8gb)"),
-    disk: bool = typer.Option(
-        True, "--disk/--no-disk", help="Resize disk (permanent, default: True)"
+    disk: bool | None = typer.Option(
+        None, "--disk/--no-disk", help="Resize disk (permanent, asked interactively if omitted)"
     ),
 ):
     """
@@ -3494,12 +3494,13 @@ def resize(
             else 0
         )
         disk_change = f"{current_disk} GB → {new_disk} GB"
-        if disk and disk_diff > 0:
-            disk_change += f" [green](+{disk_diff} GB)[/green]"
-        elif disk and disk_diff < 0:
-            disk_change += f" [yellow]({disk_diff} GB)[/yellow]"
-        elif not disk:
+        if disk is False:
+            # User explicitly passed --no-disk
             disk_change = f"{current_disk} GB (not resized)"
+        elif disk_diff > 0:
+            disk_change += f" [green](+{disk_diff} GB)[/green]"
+        elif disk_diff < 0:
+            disk_change += f" [yellow]({disk_diff} GB)[/yellow]"
         changes_table.add_row("Disk:", disk_change)
 
         # Price
@@ -3513,53 +3514,52 @@ def resize(
 
         console.print(changes_table)
 
+        # If --disk/--no-disk was not explicitly passed, ask interactively
+        # when the new size has a different disk.  This surfaces the
+        # permanent/irreversible nature of disk resize at decision time,
+        # consistent with how region/size/image are handled interactively.
+        if disk is None:
+            if isinstance(disk_diff, int) and disk_diff != 0:
+                console.print()
+                console.print(
+                    "[bold yellow]Disk resize is PERMANENT and cannot be undone.[/bold yellow]"
+                )
+                console.print("[dim]Skipping disk resize keeps the option to downsize later.[/dim]")
+                disk_choice = Prompt.ask(
+                    "[bold]Resize disk too?[/bold]",
+                    choices=["yes", "no"],
+                    default="no",
+                )
+                disk = disk_choice == "yes"
+            else:
+                # No disk change — default to True (no-op for disk)
+                disk = True
+
         # Show warnings
         console.print()
         console.print(
-            "[bold yellow]⚠ WARNING: This operation will cause downtime (droplet will be powered off)[/bold yellow]"
+            "[bold yellow]⚠ WARNING: This operation will cause downtime "
+            "(droplet will be powered off)[/bold yellow]"
         )
 
-        if disk:
+        if disk and isinstance(disk_diff, int) and disk_diff > 0:
             console.print(
                 "[bold red]⚠ WARNING: Disk resize is PERMANENT and cannot be undone![/bold red]"
             )
-        else:
+        elif not disk:
             console.print(
-                "[dim]Note: Disk will NOT be resized. You can resize it later, but it's permanent.[/dim]"
+                "[dim]Note: Disk will NOT be resized. You can resize back down later.[/dim]"
             )
 
-        # Confirmation — offer "nodisk" escape hatch when disk resize is
-        # planned and disk size would increase.  This supports the common
-        # use case of temporarily scaling up CPU/RAM (e.g. for a heavy
-        # build or benchmark) and scaling back down later, which requires
-        # NOT resizing the disk (disk resize is permanent/irreversible and
-        # prevents future downsizing).
+        # Confirmation
         console.print()
-        show_nodisk_option = disk and isinstance(disk_diff, int) and disk_diff > 0
+        confirm = Prompt.ask(
+            "[yellow]Are you sure you want to resize this droplet?[/yellow]",
+            choices=["yes", "no"],
+            default="no",
+        )
 
-        if show_nodisk_option:
-            console.print(
-                "[dim]Tip: Answer 'nodisk' to skip disk resize "
-                "(keeps resize reversible for temporary scale-ups)[/dim]"
-            )
-            confirm = Prompt.ask(
-                "[yellow]Are you sure you want to resize this droplet?[/yellow]",
-                choices=["yes", "nodisk", "no"],
-                default="no",
-            )
-        else:
-            confirm = Prompt.ask(
-                "[yellow]Are you sure you want to resize this droplet?[/yellow]",
-                choices=["yes", "no"],
-                default="no",
-            )
-
-        if confirm == "nodisk":
-            disk = False
-            console.print(
-                "[dim]Disk resize skipped — CPU/RAM only (you can resize back down later)[/dim]"
-            )
-        elif confirm != "yes":
+        if confirm != "yes":
             console.print("[dim]Cancelled.[/dim]")
             raise typer.Exit(0)
 
