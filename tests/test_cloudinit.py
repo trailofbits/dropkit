@@ -105,6 +105,8 @@ def test_rendered_template_no_tailscale_valid_schema(cloud_config_schema):
     errors = list(validator.iter_errors(doc))
     messages = [f"  - {e.message}" for e in errors]
     assert not errors, "Cloud-init schema errors:\n" + "\n".join(messages)
+
+
 def test_docker_install_uses_distro_detection():
     """Verify Docker setup detects distro dynamically instead of hardcoding Ubuntu."""
     content = _load_default_template()
