@@ -105,3 +105,24 @@ def test_rendered_template_no_tailscale_valid_schema(cloud_config_schema):
     errors = list(validator.iter_errors(doc))
     messages = [f"  - {e.message}" for e in errors]
     assert not errors, "Cloud-init schema errors:\n" + "\n".join(messages)
+def test_docker_install_uses_distro_detection():
+    """Verify Docker setup detects distro dynamically instead of hardcoding Ubuntu."""
+    content = _load_default_template()
+    template = Template(content)
+    rendered = template.render(
+        username="testuser",
+        full_name="Test User",
+        email="test@example.com",
+        ssh_keys=["ssh-ed25519 AAAAC3... test@host"],
+        tailscale_enabled=True,
+    )
+    # Must not hardcode Ubuntu — should use /etc/os-release for distro detection
+    assert "download.docker.com/linux/ubuntu" not in rendered
+    assert "/etc/os-release" in rendered
+    assert "download.docker.com/linux/$ID" in rendered
+
+    # Docker packages installed via runcmd, not apt sources
+    assert "apt-get install -y docker-ce" in rendered
+
+    # Architecture detected dynamically, not hardcoded amd64
+    assert "dpkg --print-architecture" in rendered
