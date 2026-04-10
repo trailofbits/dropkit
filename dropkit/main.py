@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 import typer
 from rich.console import Console
 from rich.panel import Panel
-from rich.prompt import Confirm, Prompt
+from rich.prompt import Prompt
 from rich.table import Table
 
 from dropkit.api import DigitalOceanAPI, DigitalOceanAPIError
@@ -405,7 +405,7 @@ def cleanup_ssh_entries(
         console.print(f"[dim]SSH config entry for {ssh_hostname} not found (skipped)[/dim]")
 
     # Clean up known_hosts
-    should_remove = not prompt_known_hosts or Confirm.ask(
+    should_remove = not prompt_known_hosts or typer.confirm(
         "Remove SSH fingerprint from known_hosts?", default=True
     )
 
@@ -2440,7 +2440,7 @@ def config_ssh(
             console.print(
                 f"[yellow]⚠[/yellow] SSH config entry for '{ssh_hostname}' already exists"
             )
-            if not Confirm.ask("Do you want to update it?", default=False):
+            if not typer.confirm("Do you want to update it?", default=False):
                 console.print("[dim]Aborted[/dim]")
                 return
 
@@ -4437,7 +4437,7 @@ def add_ssh_key_cmd(
             console.print()
 
             # Ask for confirmation to rename
-            confirm = Confirm.ask(
+            confirm = typer.confirm(
                 "Do you want to rename this key to follow dropkit naming convention?",
                 default=True,
             )
@@ -4528,8 +4528,8 @@ def delete_ssh_key_cmd(
 
         # Ask for confirmation
         console.print()
-        confirm = Confirm.ask(
-            "[yellow]Are you sure you want to delete this SSH key?[/yellow]",
+        confirm = typer.confirm(
+            "Are you sure you want to delete this SSH key?",
             default=False,
         )
 
