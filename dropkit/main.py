@@ -1579,36 +1579,33 @@ def find_user_droplet(api: DigitalOceanAPI, droplet_name: str) -> tuple[dict | N
     return None, username
 
 
-def _create_from_snapshot_and_setup(
+def _post_create_setup(
     api: DigitalOceanAPI,
     config: DropkitConfig,
+    droplet: dict,
     name: str,
-    region: str,
-    size: str,
-    snapshot_id: int,
-    tags_list: list[str],
     username: str,
-    tailscale_enabled: bool,
+    tailscale_enabled: bool = False,
     verbose: bool = False,
 ) -> tuple[dict, str | None, str | None]:
-    """Create a droplet from a snapshot and perform common post-creation setup.
+    """Shared post-creation setup for all droplet creation paths.
 
-    Shared by ``create --from-snapshot`` and ``wake``.  Handles:
+    Called after any droplet creation API call (``create_droplet``,
+    ``create_droplet_from_snapshot``).  Handles:
 
-    * API call to ``create_droplet_from_snapshot``
+    * Validating the droplet ID from the API response
     * Waiting for the droplet to become active
     * Extracting the public IP address
     * Adding an SSH config entry (if ``config.ssh.auto_update``)
     * Optional Tailscale VPN setup
 
+    Used by: ``create`` (base image), ``create --from-snapshot``, ``wake``.
+
     Args:
         api: Authenticated DigitalOcean API client.
         config: Validated dropkit configuration.
+        droplet: Raw droplet dict returned by a creation API call.
         name: Droplet name.
-        region: DigitalOcean region slug.
-        size: Droplet size slug.
-        snapshot_id: ID of the snapshot to create from.
-        tags_list: Tags to apply to the new droplet.
         username: Linux username (derived from DO account email).
         tailscale_enabled: Whether to run Tailscale setup after the droplet
             is active.
@@ -1621,19 +1618,6 @@ def _create_from_snapshot_and_setup(
     Raises:
         typer.Exit: On unrecoverable API errors.
     """
-    console.print(f"[dim]Creating droplet '{name}' from snapshot...[/dim]")
-    if verbose:
-        console.print(f"[dim][DEBUG] Snapshot ID: {snapshot_id}, no cloud-init will be sent[/dim]")
-
-    droplet = api.create_droplet_from_snapshot(
-        name=name,
-        region=region,
-        size=size,
-        snapshot_id=snapshot_id,
-        tags=tags_list,
-        ssh_keys=config.cloudinit.ssh_key_ids,
-    )
-
     droplet_id = droplet.get("id")
     if not droplet_id:
         console.print("[red]Error: Failed to get droplet ID from API response[/red]")
@@ -2225,33 +2209,29 @@ def create(
     # .zshrc overwritten, unconditional reboot).
     try:
         if from_snapshot is not None:
-            # Snapshot path — delegate to shared helper
-            active_droplet, ip_address, tailscale_ip = _create_from_snapshot_and_setup(
-                api=api,
-                config=config,
+            # Snapshot path — no cloud-init
+            console.print(f"[dim]Creating droplet '{name}' from snapshot...[/dim]")
+            if verbose:
+                console.print(
+                    f"[dim][DEBUG] Snapshot ID: {from_snapshot}, no cloud-init will be sent[/dim]"
+                )
+            droplet = api.create_droplet_from_snapshot(
                 name=name,
                 region=region,
                 size=size,
                 snapshot_id=from_snapshot,
-                tags_list=tags_list,
+                tags=tags_list,
+                ssh_keys=config.cloudinit.ssh_key_ids,
+            )
+            active_droplet, ip_address, tailscale_ip = _post_create_setup(
+                api=api,
+                config=config,
+                droplet=droplet,
+                name=name,
                 username=username,
                 tailscale_enabled=tailscale_enabled,
                 verbose=verbose,
             )
-
-            # Assign droplet to project if specified
-            droplet_id = active_droplet.get("id")
-            if project_id and droplet_id:
-                try:
-                    console.print(f"[dim]Assigning droplet to project '{project_name}'...[/dim]")
-                    droplet_urn = api.get_droplet_urn(droplet_id)
-                    api.assign_resources_to_project(project_id, [droplet_urn])
-                    console.print(
-                        f"[green]✓[/green] Assigned to project: [cyan]{project_name}[/cyan]"
-                    )
-                except DigitalOceanAPIError as e:
-                    console.print(f"[yellow]⚠[/yellow] Could not assign to project: {e}")
-
             ssh_hostname = get_ssh_hostname(name)
             cloud_init_done = True
             cloud_init_error = False
@@ -2288,100 +2268,39 @@ def create(
                 ssh_keys=config.cloudinit.ssh_key_ids,
             )
 
-            droplet_id = droplet.get("id")
-            if not droplet_id:
-                console.print("[red]Error: Failed to get droplet ID from API response[/red]")
-                raise typer.Exit(1)
-
-            console.print(f"[green]✓[/green] Droplet created with ID: [cyan]{droplet_id}[/cyan]")
-
-            if verbose:
-                console.print(f"[dim][DEBUG] Droplet status: {droplet.get('status')}[/dim]")
-                console.print(f"[dim][DEBUG] Full droplet response: {droplet}[/dim]")
-
-            # Wait for droplet to become active
-            console.print("[dim]Waiting for droplet to become active...[/dim]")
-            if verbose:
-                console.print("[dim][DEBUG] Polling droplet status every 5 seconds...[/dim]")
-
-            with console.status("[cyan]Waiting...[/cyan]"):
-                active_droplet = api.wait_for_droplet_active(droplet_id)
-
-            console.print("[green]✓[/green] Droplet is now active")
-
-            if verbose:
-                console.print(
-                    f"[dim][DEBUG] Active droplet networks: {active_droplet.get('networks')}[/dim]"
-                )
-
-            # Assign droplet to project if specified
-            if project_id:
-                try:
-                    console.print(f"[dim]Assigning droplet to project '{project_name}'...[/dim]")
-                    droplet_urn = api.get_droplet_urn(droplet_id)
-                    api.assign_resources_to_project(project_id, [droplet_urn])
-                    console.print(
-                        f"[green]✓[/green] Assigned to project: [cyan]{project_name}[/cyan]"
-                    )
-                except DigitalOceanAPIError as e:
-                    console.print(f"[yellow]⚠[/yellow] Could not assign to project: {e}")
-
-            # Get IP address
-            networks = active_droplet.get("networks", {})
-            v4_networks = networks.get("v4", [])
-            ip_address = None
-
-            for network in v4_networks:
-                if network.get("type") == "public":
-                    ip_address = network.get("ip_address")
-                    break
-
-            # Initialize for type safety - ssh_hostname needed for output regardless
+            # Shared post-creation setup: wait for active, extract IP, SSH config.
+            # Tailscale is NOT passed here — for base images it runs after cloud-init.
+            active_droplet, ip_address, _ = _post_create_setup(
+                api=api,
+                config=config,
+                droplet=droplet,
+                name=name,
+                username=username,
+                tailscale_enabled=False,
+                verbose=verbose,
+            )
             ssh_hostname = get_ssh_hostname(name)
             tailscale_ip: str | None = None
 
             if not ip_address:
-                console.print("[yellow]⚠[/yellow] Could not determine IP address")
                 cloud_init_done = False
                 cloud_init_error = False
             else:
-                console.print(f"[green]✓[/green] IP address: [cyan]{ip_address}[/cyan]")
-                if verbose:
-                    console.print(f"[dim][DEBUG] All v4 networks: {v4_networks}[/dim]")
-
-                # Add SSH config entry first so we can use it for cloud-init checks
-                if config.ssh.auto_update:
-                    try:
-                        console.print("[dim]Adding SSH config entry...[/dim]")
-                        if verbose:
-                            console.print(
-                                f"[dim][DEBUG] SSH config path: {config.ssh.config_path}[/dim]"
-                            )
-                            console.print(
-                                f"[dim][DEBUG] Adding host '{name}' -> "
-                                f"{username}@{ip_address}[/dim]"
-                            )
-                            console.print(
-                                f"[dim][DEBUG] Identity file: {config.ssh.identity_file}[/dim]"
-                            )
-
-                        add_ssh_host(
-                            config_path=config.ssh.config_path,
-                            host_name=ssh_hostname,
-                            hostname=ip_address,
-                            user=username,
-                            identity_file=config.ssh.identity_file,
-                        )
-                        console.print(
-                            f"[green]✓[/green] Added SSH config: [cyan]ssh {ssh_hostname}[/cyan]"
-                        )
-                    except Exception as e:
-                        console.print(f"[yellow]⚠[/yellow] Could not update SSH config: {e}")
-
                 # Base image: wait for cloud-init to complete
                 cloud_init_done, cloud_init_error = wait_for_cloud_init(ssh_hostname, verbose)
                 if tailscale_enabled and cloud_init_done:
                     tailscale_ip = setup_tailscale(ssh_hostname, username, config, verbose)
+
+        # Assign droplet to project if specified (shared across both paths)
+        droplet_id = active_droplet.get("id")
+        if project_id and droplet_id:
+            try:
+                console.print(f"[dim]Assigning droplet to project '{project_name}'...[/dim]")
+                droplet_urn = api.get_droplet_urn(droplet_id)
+                api.assign_resources_to_project(project_id, [droplet_urn])
+                console.print(f"[green]✓[/green] Assigned to project: [cyan]{project_name}[/cyan]")
+            except DigitalOceanAPIError as e:
+                console.print(f"[yellow]⚠[/yellow] Could not assign to project: {e}")
 
         # Show summary based on cloud-init and Tailscale status
         console.print()
@@ -4246,19 +4165,25 @@ def wake(
         )
         console.print()
 
-        # Build tags and create droplet from snapshot via shared helper.
+        # Build tags and create droplet from snapshot.
         # Tailscale is handled separately for wake (only if was_tailscale_locked),
-        # so we pass tailscale_enabled=False here and do it ourselves below.
+        # so we pass tailscale_enabled=False to the shared helper.
         tags_list = build_droplet_tags(username, list(config.defaults.extra_tags))
 
-        active_droplet, ip_address, _ = _create_from_snapshot_and_setup(
-            api=api,
-            config=config,
+        console.print(f"[dim]Creating droplet '{droplet_name}' from snapshot...[/dim]")
+        droplet = api.create_droplet_from_snapshot(
             name=droplet_name,
             region=original_region,
             size=original_size,
             snapshot_id=snapshot_id,
-            tags_list=tags_list,
+            tags=tags_list,
+            ssh_keys=config.cloudinit.ssh_key_ids,
+        )
+        active_droplet, ip_address, _ = _post_create_setup(
+            api=api,
+            config=config,
+            droplet=droplet,
+            name=droplet_name,
             username=username,
             tailscale_enabled=False,  # wake handles Tailscale separately
         )
