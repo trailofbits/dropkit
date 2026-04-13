@@ -3493,9 +3493,31 @@ def resize(
             if isinstance(new_disk, int) and isinstance(current_disk, int)
             else 0
         )
+
+        # If --disk/--no-disk was not explicitly passed, ask interactively
+        # when the new size has a different disk.  This surfaces the
+        # permanent/irreversible nature of disk resize at decision time,
+        # consistent with how region/size/image are handled interactively.
+        # Resolved BEFORE building the table so the row reflects the choice.
+        if disk is None:
+            if disk_diff != 0:
+                console.print()
+                console.print(
+                    "[bold yellow]Disk resize is PERMANENT and cannot be undone.[/bold yellow]"
+                )
+                console.print("[dim]Skipping disk resize keeps the option to downsize later.[/dim]")
+                disk_choice = Prompt.ask(
+                    "[bold]Resize disk too?[/bold]",
+                    choices=["yes", "no"],
+                    default="no",
+                )
+                disk = disk_choice == "yes"
+            else:
+                # No disk change — default to True (no-op for disk)
+                disk = True
+
         disk_change = f"{current_disk} GB → {new_disk} GB"
         if disk is False:
-            # User explicitly passed --no-disk
             disk_change = f"{current_disk} GB (not resized)"
         elif disk_diff > 0:
             disk_change += f" [green](+{disk_diff} GB)[/green]"
@@ -3514,27 +3536,6 @@ def resize(
 
         console.print(changes_table)
 
-        # If --disk/--no-disk was not explicitly passed, ask interactively
-        # when the new size has a different disk.  This surfaces the
-        # permanent/irreversible nature of disk resize at decision time,
-        # consistent with how region/size/image are handled interactively.
-        if disk is None:
-            if isinstance(disk_diff, int) and disk_diff != 0:
-                console.print()
-                console.print(
-                    "[bold yellow]Disk resize is PERMANENT and cannot be undone.[/bold yellow]"
-                )
-                console.print("[dim]Skipping disk resize keeps the option to downsize later.[/dim]")
-                disk_choice = Prompt.ask(
-                    "[bold]Resize disk too?[/bold]",
-                    choices=["yes", "no"],
-                    default="no",
-                )
-                disk = disk_choice == "yes"
-            else:
-                # No disk change — default to True (no-op for disk)
-                disk = True
-
         # Show warnings
         console.print()
         console.print(
@@ -3542,7 +3543,7 @@ def resize(
             "(droplet will be powered off)[/bold yellow]"
         )
 
-        if disk and isinstance(disk_diff, int) and disk_diff > 0:
+        if disk and disk_diff > 0:
             console.print(
                 "[bold red]⚠ WARNING: Disk resize is PERMANENT and cannot be undone![/bold red]"
             )
