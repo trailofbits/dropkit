@@ -930,6 +930,7 @@ class DigitalOceanAPI:
         snapshot_id: int,
         tags: list[str],
         ssh_keys: list[int] | None = None,
+        user_data: str | None = None,
     ) -> dict[str, Any]:
         """
         Create a new droplet from a snapshot image.
@@ -941,6 +942,7 @@ class DigitalOceanAPI:
             snapshot_id: Snapshot ID to restore from
             tags: List of tags to apply
             ssh_keys: List of SSH key IDs for root access (optional)
+            user_data: Cloud-init user-data script to run on first boot (optional)
 
         Returns:
             Droplet object from API response
@@ -960,6 +962,9 @@ class DigitalOceanAPI:
 
         if ssh_keys:
             payload["ssh_keys"] = ssh_keys
+
+        if user_data is not None:
+            payload["user_data"] = user_data
 
         response = self._request("POST", "/droplets", json=payload)
         return response.get("droplet", {})
