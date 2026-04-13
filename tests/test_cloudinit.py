@@ -1,7 +1,7 @@
 """Tests for cloud-init template parsing and rendering."""
 
 import json
-import urllib.request
+from pathlib import Path
 
 import pytest
 import yaml
@@ -10,20 +10,15 @@ from jsonschema import Draft4Validator
 
 from dropkit.config import Config
 
-CLOUD_CONFIG_SCHEMA_URL = (
-    "https://raw.githubusercontent.com/canonical/cloud-init/main/"
-    "cloudinit/config/schemas/schema-cloud-config-v1.json"
-)
+# Pinned to cloud-init 22.4.2 — the oldest version shipped by a
+# currently supported DigitalOcean image (Debian 12 bookworm).
+_SCHEMA_PATH = Path(__file__).parent / "data" / "schema-cloud-config-v1.json"
 
 
 @pytest.fixture(scope="module")
 def cloud_config_schema():
-    """Fetch the official cloud-init JSON schema (skip if offline)."""
-    try:
-        with urllib.request.urlopen(CLOUD_CONFIG_SCHEMA_URL, timeout=10) as resp:  # noqa: S310
-            return json.loads(resp.read())
-    except (urllib.error.URLError, TimeoutError):
-        pytest.skip("Could not fetch cloud-init schema (offline?)")
+    """Load the cloud-init JSON schema from local test data."""
+    return json.loads(_SCHEMA_PATH.read_text())
 
 
 def _load_default_template() -> str:
