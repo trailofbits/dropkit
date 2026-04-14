@@ -62,7 +62,7 @@ packages = ["dropkit"]
 [dependency-groups]
 dev = [
     "jsonschema>=4.26.0",
-    "pytest>=8.4.2",
+    "pytest>=9.0.3",
     "pytest-cov",
     "ruff>=0.8.0",
     "ty",
