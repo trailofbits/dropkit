@@ -1597,11 +1597,6 @@ def _post_create_setup(
     * Extracting the public IP address
     * Adding an SSH config entry (if ``config.ssh.auto_update``)
 
-    Tailscale setup is intentionally NOT done here — each caller invokes
-    ``setup_tailscale`` at the right moment (e.g. after cloud-init for base
-    images, conditionally for ``wake``), since the timing is a UI concern
-    specific to each creation path.
-
     Used by: ``create`` (base image), ``create --from-snapshot``, ``wake``.
 
     Args:
@@ -2228,10 +2223,7 @@ def create(
                 verbose=verbose,
             )
             ssh_hostname = get_ssh_hostname(name)
-            tailscale_ip: str | None = None
-            # Snapshot path: run Tailscale immediately (no cloud-init to wait for)
-            if tailscale_enabled and ip_address:
-                tailscale_ip = setup_tailscale(ssh_hostname, username, config, verbose)
+            # Snapshot has no cloud-init to wait for.
             cloud_init_done = True
             cloud_init_error = False
         else:
@@ -2277,7 +2269,6 @@ def create(
                 verbose=verbose,
             )
             ssh_hostname = get_ssh_hostname(name)
-            tailscale_ip = None
 
             if not ip_address:
                 cloud_init_done = False
@@ -2285,8 +2276,13 @@ def create(
             else:
                 # Base image: wait for cloud-init to complete
                 cloud_init_done, cloud_init_error = wait_for_cloud_init(ssh_hostname, verbose)
-                if tailscale_enabled and cloud_init_done:
-                    tailscale_ip = setup_tailscale(ssh_hostname, username, config, verbose)
+
+        # Tailscale setup (shared across both paths):
+        # snapshot path has cloud_init_done=True so runs immediately;
+        # base-image path only runs if cloud-init completed successfully.
+        tailscale_ip: str | None = None
+        if tailscale_enabled and cloud_init_done and ip_address:
+            tailscale_ip = setup_tailscale(ssh_hostname, username, config, verbose)
 
         # Assign droplet to project if specified (shared across both paths)
         droplet_id = active_droplet.get("id")
