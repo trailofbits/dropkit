@@ -1585,9 +1585,8 @@ def _post_create_setup(
     droplet: dict,
     name: str,
     username: str,
-    tailscale_enabled: bool = False,
     verbose: bool = False,
-) -> tuple[dict, str | None, str | None]:
+) -> tuple[dict, str | None]:
     """Shared post-creation setup for all droplet creation paths.
 
     Called after any droplet creation API call (``create_droplet``,
@@ -1597,7 +1596,11 @@ def _post_create_setup(
     * Waiting for the droplet to become active
     * Extracting the public IP address
     * Adding an SSH config entry (if ``config.ssh.auto_update``)
-    * Optional Tailscale VPN setup
+
+    Tailscale setup is intentionally NOT done here — each caller invokes
+    ``setup_tailscale`` at the right moment (e.g. after cloud-init for base
+    images, conditionally for ``wake``), since the timing is a UI concern
+    specific to each creation path.
 
     Used by: ``create`` (base image), ``create --from-snapshot``, ``wake``.
 
@@ -1607,13 +1610,11 @@ def _post_create_setup(
         droplet: Raw droplet dict returned by a creation API call.
         name: Droplet name.
         username: Linux username (derived from DO account email).
-        tailscale_enabled: Whether to run Tailscale setup after the droplet
-            is active.
         verbose: Emit extra debug output.
 
     Returns:
-        ``(active_droplet, ip_address, tailscale_ip)`` where *ip_address* and
-        *tailscale_ip* may be ``None`` when unavailable.
+        ``(active_droplet, ip_address)`` where *ip_address* may be ``None``
+        when unavailable.
 
     Raises:
         typer.Exit: On unrecoverable API errors.
@@ -1657,7 +1658,6 @@ def _post_create_setup(
 
     # SSH config setup
     ssh_hostname = get_ssh_hostname(name)
-    tailscale_ip: str | None = None
 
     if ip_address and config.ssh.auto_update:
         try:
@@ -1677,11 +1677,7 @@ def _post_create_setup(
         except Exception as e:
             console.print(f"[yellow]⚠[/yellow] Could not update SSH config: {e}")
 
-    # Tailscale setup
-    if tailscale_enabled and ip_address:
-        tailscale_ip = setup_tailscale(ssh_hostname, username, config, verbose)
-
-    return active_droplet, ip_address, tailscale_ip
+    return active_droplet, ip_address
 
 
 def find_project_by_name_or_id(
@@ -2223,16 +2219,19 @@ def create(
                 tags=tags_list,
                 ssh_keys=config.cloudinit.ssh_key_ids,
             )
-            active_droplet, ip_address, tailscale_ip = _post_create_setup(
+            active_droplet, ip_address = _post_create_setup(
                 api=api,
                 config=config,
                 droplet=droplet,
                 name=name,
                 username=username,
-                tailscale_enabled=tailscale_enabled,
                 verbose=verbose,
             )
             ssh_hostname = get_ssh_hostname(name)
+            tailscale_ip: str | None = None
+            # Snapshot path: run Tailscale immediately (no cloud-init to wait for)
+            if tailscale_enabled and ip_address:
+                tailscale_ip = setup_tailscale(ssh_hostname, username, config, verbose)
             cloud_init_done = True
             cloud_init_error = False
         else:
@@ -2269,18 +2268,16 @@ def create(
             )
 
             # Shared post-creation setup: wait for active, extract IP, SSH config.
-            # Tailscale is NOT passed here — for base images it runs after cloud-init.
-            active_droplet, ip_address, _ = _post_create_setup(
+            active_droplet, ip_address = _post_create_setup(
                 api=api,
                 config=config,
                 droplet=droplet,
                 name=name,
                 username=username,
-                tailscale_enabled=False,
                 verbose=verbose,
             )
             ssh_hostname = get_ssh_hostname(name)
-            tailscale_ip: str | None = None
+            tailscale_ip = None
 
             if not ip_address:
                 cloud_init_done = False
@@ -4166,8 +4163,7 @@ def wake(
         console.print()
 
         # Build tags and create droplet from snapshot.
-        # Tailscale is handled separately for wake (only if was_tailscale_locked),
-        # so we pass tailscale_enabled=False to the shared helper.
+        # Tailscale is handled separately below (only if was_tailscale_locked).
         tags_list = build_droplet_tags(username, list(config.defaults.extra_tags))
 
         console.print(f"[dim]Creating droplet '{droplet_name}' from snapshot...[/dim]")
@@ -4179,13 +4175,12 @@ def wake(
             tags=tags_list,
             ssh_keys=config.cloudinit.ssh_key_ids,
         )
-        active_droplet, ip_address, _ = _post_create_setup(
+        active_droplet, ip_address = _post_create_setup(
             api=api,
             config=config,
             droplet=droplet,
             name=droplet_name,
             username=username,
-            tailscale_enabled=False,  # wake handles Tailscale separately
         )
 
         # Handle Tailscale re-setup if the original droplet had Tailscale lockdown
