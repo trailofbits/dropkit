@@ -973,6 +973,63 @@ def is_droplet_tailscale_locked(config: DropkitConfig, droplet_name: str) -> boo
     return is_tailscale_ip(current_ip)
 
 
+def wait_for_ssh(
+    ssh_hostname: str,
+    timeout: int = 60,
+    interval: int = 5,
+) -> bool:
+    """
+    Poll until SSH is reachable on a host.
+
+    Runs a lightweight SSH command (true) with a short ConnectTimeout,
+    retrying until success or the overall timeout is exceeded.
+
+    Returns:
+        True if SSH became reachable, False if timed out.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            result = subprocess.run(
+                [
+                    "ssh",
+                    "-o",
+                    "StrictHostKeyChecking=no",
+                    "-o",
+                    "UserKnownHostsFile=/dev/null",
+                    "-o",
+                    "ConnectTimeout=5",
+                    "-o",
+                    "BatchMode=yes",
+                    ssh_hostname,
+                    "true",
+                ],
+                capture_output=True,
+                timeout=10,
+            )
+            if result.returncode == 0:
+                return True
+        except (subprocess.TimeoutExpired, subprocess.SubprocessError, OSError):
+            pass
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            time.sleep(min(interval, remaining))
+    return False
+
+
+def build_wake_user_data(was_tailscale_locked: bool) -> str | None:
+    """Build cloud-init user_data script for wake, or None if not needed."""
+    if not was_tailscale_locked:
+        return None
+    return (
+        "#!/bin/bash\n"
+        "set -euo pipefail\n"
+        "echo 'dropkit-wake: opening SSH on eth0' | logger -t dropkit\n"
+        "ufw allow in on eth0 to any port 22\n"
+        "echo 'dropkit-wake: SSH rule applied successfully' | logger -t dropkit\n"
+    )
+
+
 def add_temporary_ssh_rule(ssh_hostname: str, verbose: bool = False) -> bool:
     """
     Add temporary UFW rule to allow SSH on public interface (eth0).
@@ -1010,10 +1067,15 @@ def add_temporary_ssh_rule(ssh_hostname: str, verbose: bool = False) -> bool:
             if result.stderr:
                 console.print(f"[dim]stderr: {result.stderr}[/dim]")
 
-        return result.returncode == 0
+        if result.returncode != 0:
+            stderr_msg = result.stderr.strip()[:200] if result.stderr else "no error output"
+            console.print(
+                f"[dim]SSH rule command failed (exit {result.returncode}): {stderr_msg}[/dim]"
+            )
+            return False
+        return True
     except (subprocess.TimeoutExpired, subprocess.SubprocessError) as e:
-        if verbose:
-            console.print(f"[dim]SSH command failed: {e}[/dim]")
+        console.print(f"[dim]SSH command failed: {e}[/dim]")
         return False
 
 
@@ -1023,7 +1085,7 @@ def prepare_for_hibernate(
     droplet: dict,
     droplet_name: str,
     verbose: bool = False,
-) -> bool:
+) -> bool | None:
     """
     Prepare droplet for hibernation, handling Tailscale lockdown if present.
 
@@ -1039,7 +1101,9 @@ def prepare_for_hibernate(
         verbose: Show debug output
 
     Returns:
-        True if droplet was under Tailscale lockdown, False otherwise
+        True if droplet was under Tailscale lockdown and prepared successfully,
+        False if no Tailscale lockdown detected,
+        None if preparation failed (hibernate should abort).
     """
     if not is_droplet_tailscale_locked(config, droplet_name):
         return False
@@ -1051,13 +1115,11 @@ def prepare_for_hibernate(
     # Add temporary SSH rule via Tailscale connection (must succeed before logout)
     console.print("[dim]Adding temporary SSH rule for eth0...[/dim]")
     if not add_temporary_ssh_rule(ssh_hostname, verbose):
-        # Temp rule failed - abort logout to keep Tailscale connectivity
         console.print(
-            "[yellow]⚠[/yellow] Could not add temporary SSH rule - "
-            "skipping Tailscale logout to maintain connectivity"
+            "[red]Error:[/red] Could not add temporary SSH rule. "
+            "Aborting hibernate to prevent unreachable droplet on wake."
         )
-        # Continue without logout - snapshot will preserve Tailscale state
-        return True
+        return None
 
     console.print("[green]✓[/green] Temporary SSH rule added")
 
@@ -1073,21 +1135,30 @@ def prepare_for_hibernate(
             public_ip = network.get("ip_address")
             break
 
-    if public_ip:
-        console.print(f"[dim]Updating SSH config to public IP: {public_ip}[/dim]")
-        try:
-            username = api.get_username()
-            add_ssh_host(
-                config_path=config.ssh.config_path,
-                host_name=ssh_hostname,
-                hostname=public_ip,
-                user=username,
-                identity_file=config.ssh.identity_file,
-            )
-            console.print("[green]✓[/green] SSH config updated to public IP")
-        except Exception as e:
-            if verbose:
-                console.print(f"[dim]Could not update SSH config: {e}[/dim]")
+    if not public_ip:
+        console.print(
+            "[red]Error:[/red] Could not determine public IP for droplet. "
+            "Aborting hibernate to prevent unreachable droplet on wake."
+        )
+        return None
+
+    console.print(f"[dim]Updating SSH config to public IP: {public_ip}[/dim]")
+    try:
+        username = api.get_username()
+        add_ssh_host(
+            config_path=config.ssh.config_path,
+            host_name=ssh_hostname,
+            hostname=public_ip,
+            user=username,
+            identity_file=config.ssh.identity_file,
+        )
+        console.print("[green]✓[/green] SSH config updated to public IP")
+    except (OSError, DigitalOceanAPIError) as e:
+        console.print(
+            f"[red]Error:[/red] Could not update SSH config to public IP: {e}. "
+            "Aborting hibernate to prevent unreachable droplet on wake."
+        )
+        return None
 
     # Now safe to logout from Tailscale (SSH config points to public IP)
     console.print("[dim]Logging out from Tailscale...[/dim]")
@@ -3902,6 +3973,11 @@ def hibernate(
             # Note: tailscale_locked was already detected earlier
             if tailscale_locked:
                 console.print("[dim]Detected Tailscale lockdown[/dim]")
+                console.print(
+                    "[yellow]Note:[/yellow] Cannot verify temporary SSH rule on a "
+                    "powered-off droplet. If the droplet is unreachable after wake, "
+                    "use the DigitalOcean console to access it."
+                )
 
             _complete_hibernate(
                 api,
@@ -3962,7 +4038,11 @@ def hibernate(
         console.print()
 
         # Step 0: Prepare for hibernate (handle Tailscale lockdown if present)
-        tailscale_locked = prepare_for_hibernate(config, api, droplet, droplet_name, verbose)
+        prepare_result = prepare_for_hibernate(config, api, droplet, droplet_name, verbose)
+        if prepare_result is None:
+            console.print("[dim]Fix the SSH connectivity issue and retry.[/dim]")
+            raise typer.Exit(1)
+        tailscale_locked = prepare_result
 
         # Step 1: Power off if not already off
         if status != "off":
@@ -4037,6 +4117,7 @@ def wake(
         ..., autocompletion=complete_snapshot_name, help="Name of the hibernated droplet to restore"
     ),
     no_tailscale: bool = typer.Option(False, "--no-tailscale", help="Skip Tailscale VPN re-setup"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show verbose debug output"),
 ):
     """
     Wake a hibernated droplet (restore from snapshot).
@@ -4126,6 +4207,13 @@ def wake(
         # Build tags for new droplet
         tags_list = build_droplet_tags(username, list(config.defaults.extra_tags))
 
+        # Ensure SSH access on eth0 for Tailscale-locked snapshots.
+        # Older snapshots may have been created without the temporary SSH rule.
+        # The eth0 rule is cleaned up by lock_down_to_tailscale() during Tailscale re-setup.
+        wake_user_data = build_wake_user_data(was_tailscale_locked)
+        if wake_user_data:
+            console.print("[dim]Injecting cloud-init script to open SSH access on eth0...[/dim]")
+
         droplet = api.create_droplet_from_snapshot(
             name=droplet_name,
             region=original_region,
@@ -4133,6 +4221,7 @@ def wake(
             snapshot_id=snapshot_id,
             tags=tags_list,
             ssh_keys=config.cloudinit.ssh_key_ids,
+            user_data=wake_user_data,
         )
 
         droplet_id = droplet.get("id")
@@ -4177,7 +4266,7 @@ def wake(
                     identity_file=config.ssh.identity_file,
                 )
                 console.print("[green]✓[/green] SSH config updated")
-            except Exception as e:
+            except OSError as e:
                 console.print(f"[yellow]⚠[/yellow] Could not update SSH config: {e}")
 
         # Handle Tailscale re-setup if the original droplet had Tailscale lockdown
@@ -4185,13 +4274,16 @@ def wake(
             ssh_hostname = get_ssh_hostname(droplet_name)
             if no_tailscale:
                 console.print()
-                console.print("[yellow]⚠[/yellow] Original droplet had Tailscale lockdown enabled.")
                 console.print(
-                    "[dim]Skipping Tailscale setup (--no-tailscale). "
-                    "Public SSH access available.[/dim]"
+                    "[yellow]⚠ Security notice:[/yellow] "
+                    "Original droplet had Tailscale lockdown enabled."
                 )
                 console.print(
-                    f"[dim]Enable Tailscale later with: "
+                    "[yellow]SSH port 22 is now open on the public interface "
+                    "and will remain so until Tailscale is re-enabled.[/yellow]"
+                )
+                console.print(
+                    f"[dim]Re-enable Tailscale lockdown with: "
                     f"[cyan]dropkit enable-tailscale {droplet_name}[/cyan][/dim]"
                 )
             else:
@@ -4199,22 +4291,30 @@ def wake(
                 console.print(
                     "[dim]Original droplet had Tailscale lockdown - re-setting up Tailscale...[/dim]"
                 )
-                # Wait a bit for droplet to be fully ready for SSH
-                console.print("[dim]Waiting for droplet to be ready for SSH...[/dim]")
-                time.sleep(10)
-
-                # Re-setup Tailscale (clean state from hibernate logout)
-                tailscale_ip = setup_tailscale(ssh_hostname, username, config)
-
-                if not tailscale_ip:
+                console.print("[dim]Waiting for SSH to become reachable...[/dim]")
+                if not wait_for_ssh(ssh_hostname, timeout=60):
+                    console.print("[red]Error: SSH is not reachable on the public IP.[/red]")
                     console.print(
-                        "[yellow]⚠[/yellow] Tailscale setup incomplete. "
-                        "Public SSH access remains available."
+                        "[dim]The cloud-init script may have failed. "
+                        "Check /var/log/cloud-init-output.log via the DigitalOcean console.[/dim]"
                     )
                     console.print(
-                        f"[dim]Complete setup later with: "
+                        f"[dim]Once resolved, run: "
                         f"[cyan]dropkit enable-tailscale {droplet_name}[/cyan][/dim]"
                     )
+                else:
+                    # Re-setup Tailscale (clean state from hibernate logout)
+                    tailscale_ip = setup_tailscale(ssh_hostname, username, config, verbose)
+
+                    if not tailscale_ip:
+                        console.print(
+                            "[yellow]⚠[/yellow] Tailscale setup incomplete. "
+                            "Public SSH access remains available."
+                        )
+                        console.print(
+                            f"[dim]Complete setup later with: "
+                            f"[cyan]dropkit enable-tailscale {droplet_name}[/cyan][/dim]"
+                        )
 
         # Prompt to delete snapshot
         console.print()
