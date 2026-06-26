@@ -46,6 +46,13 @@ console = Console()
 # https://docs.digitalocean.com/products/snapshots/details/pricing/
 SNAPSHOT_COST_PER_GB_MONTHLY = 0.06
 
+JSON_HELP = "Emit machine-readable JSON instead of formatted output (for scripting and agents)"
+
+
+def emit_json(payload: Any) -> None:
+    """Print a payload as formatted JSON on stdout for scripting and agents."""
+    console.print_json(json.dumps(payload))
+
 
 @app.callback()
 def main_callback():
@@ -2246,10 +2253,195 @@ def create(
         raise typer.Exit(1)
 
 
+def build_droplet_record(droplet: dict[str, Any], ssh_config_path: str) -> dict[str, Any]:
+    """Extract the agent-relevant fields from a raw droplet API object.
+
+    Missing values are represented as ``None`` rather than placeholder strings
+    so JSON consumers can branch on them cleanly.
+    """
+    name = droplet.get("name", "")
+
+    ip_address = None
+    for network in droplet.get("networks", {}).get("v4", []):
+        if network.get("type") == "public":
+            ip_address = network.get("ip_address")
+            break
+
+    ssh_hostname = get_ssh_hostname(name)
+    in_ssh_config = host_exists(ssh_config_path, ssh_hostname)
+    ssh_ip = get_ssh_host_ip(ssh_config_path, ssh_hostname)
+    tailscale_ip = ssh_ip if ssh_ip and is_tailscale_ip(ssh_ip) else None
+
+    return {
+        "id": droplet.get("id"),
+        "name": name,
+        "status": droplet.get("status"),
+        "ip": ip_address,
+        "tailscale_ip": tailscale_ip,
+        "region": droplet.get("region", {}).get("slug"),
+        "size": droplet.get("size_slug"),
+        "cost_monthly": float(droplet.get("size", {}).get("price_monthly", 0)),
+        "in_ssh_config": in_ssh_config,
+        "ssh_hostname": ssh_hostname,
+        "tags": droplet.get("tags", []),
+    }
+
+
+def build_hibernated_record(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Extract the agent-relevant fields from a hibernated-snapshot API object."""
+    snapshot_name = snapshot.get("name", "")
+    droplet_name = get_droplet_name_from_snapshot(snapshot_name) or snapshot_name
+
+    droplet_size = None
+    for tag in snapshot.get("tags", []):
+        if tag.startswith("size:"):
+            droplet_size = tag.removeprefix("size:")
+
+    size_gb = float(snapshot.get("size_gigabytes", 0))
+    regions = snapshot.get("regions", [])
+
+    return {
+        "name": droplet_name,
+        "snapshot_name": snapshot_name,
+        "droplet_size": droplet_size,
+        "image_size_gb": size_gb,
+        "region": regions[0] if regions else None,
+        "cost_monthly": size_gb * SNAPSHOT_COST_PER_GB_MONTHLY,
+    }
+
+
+def build_droplet_detail(droplet: dict[str, Any], ssh_config_path: str) -> dict[str, Any]:
+    """Build the detailed droplet record emitted by ``info --json``.
+
+    Extends :func:`build_droplet_record` with hardware specs, image details,
+    timestamps, and full network data (including IPv6).
+    """
+    record = build_droplet_record(droplet, ssh_config_path)
+    size = droplet.get("size", {})
+    image = droplet.get("image", {})
+    record.update(
+        {
+            "created_at": droplet.get("created_at"),
+            "vcpus": size.get("vcpus"),
+            "memory_mb": size.get("memory"),
+            "disk_gb": size.get("disk"),
+            "transfer_tb": size.get("transfer"),
+            "image": {
+                "distribution": image.get("distribution"),
+                "name": image.get("name"),
+                "slug": image.get("slug"),
+            },
+            "features": droplet.get("features", []),
+            "networks": droplet.get("networks", {}),
+        }
+    )
+    return record
+
+
+def build_ssh_key_record(key: dict[str, Any]) -> dict[str, Any]:
+    """Extract the agent-relevant fields from an SSH key API object."""
+    return {
+        "name": key.get("name"),
+        "id": key.get("id"),
+        "fingerprint": key.get("fingerprint"),
+    }
+
+
+def render_droplet_list(
+    droplets: list[dict[str, Any]],
+    hibernated: list[dict[str, Any]],
+    total_monthly_cost: float,
+    cost: bool,
+    tag_name: str,
+) -> None:
+    """Render droplet and hibernated-snapshot records as Rich tables."""
+    status_colors = {"active": "green", "new": "yellow"}
+
+    if droplets:
+        console.print("[bold]Droplets:[/bold]")
+        table = Table(show_header=True, header_style="bold cyan")
+        table.add_column("Name", style="white", no_wrap=True)
+        table.add_column("Status", style="white", no_wrap=True)
+        table.add_column("IP Address", style="cyan", no_wrap=True)
+        table.add_column("Tailscale IP", style="magenta", no_wrap=True)
+        table.add_column("Region", style="white", no_wrap=True)
+        table.add_column("Size", style="white", no_wrap=True)
+        if cost:
+            table.add_column("Cost", style="green", no_wrap=True, justify="right")
+        table.add_column("SSH", style="white", no_wrap=True)
+
+        for d in droplets:
+            status = d["status"] or "N/A"
+            color = status_colors.get(status, "red")
+            row = [
+                d["name"],
+                f"[{color}]{status}[/{color}]",
+                d["ip"] or "N/A",
+                d["tailscale_ip"] or "—",
+                d["region"] or "N/A",
+                d["size"] or "N/A",
+            ]
+            if cost:
+                row.append(f"${d['cost_monthly']:.2f}/mo")
+            row.append("✓" if d["in_ssh_config"] else "✗")
+            table.add_row(*row)
+
+        console.print(table)
+
+    if hibernated:
+        if droplets:
+            console.print()  # Spacing between tables
+        console.print("[bold]Hibernated:[/bold]")
+        snap_table = Table(show_header=True, header_style="bold cyan")
+        snap_table.add_column("Name", style="white", no_wrap=True)
+        snap_table.add_column("Droplet Size", style="white", no_wrap=True)
+        snap_table.add_column("Image Size", style="white", no_wrap=True)
+        snap_table.add_column("Region", style="white", no_wrap=True)
+        if cost:
+            snap_table.add_column("Cost", style="green", no_wrap=True, justify="right")
+
+        for s in hibernated:
+            row = [
+                s["name"],
+                s["droplet_size"] or "N/A",
+                f"{s['image_size_gb']:g} GB",
+                s["region"] or "N/A",
+            ]
+            if cost:
+                row.append(f"${s['cost_monthly']:.2f}/mo")
+            snap_table.add_row(*row)
+
+        console.print(snap_table)
+        console.print()
+        console.print("[dim]Wake with: dropkit wake <name>[/dim]")
+
+    if droplets or hibernated:
+        console.print()
+        parts = []
+        if droplets:
+            parts.append(f"{len(droplets)} droplet(s)")
+        if hibernated:
+            parts.append(f"{len(hibernated)} hibernated")
+        summary = f"[dim]Total: {', '.join(parts)}"
+        if cost:
+            summary += f" — [green]${total_monthly_cost:.2f}/mo[/green]"
+        summary += "[/dim]"
+        console.print(summary)
+    else:
+        console.print(
+            f"[yellow]No droplets or hibernated snapshots found with tag: {tag_name}[/yellow]"
+        )
+
+
 @app.command(name="list")
 @app.command(name="ls", hidden=True)
 def list_droplets(
     cost: bool = typer.Option(True, "--cost/--no-cost", help="Show monthly cost column"),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Emit machine-readable JSON instead of a table (for scripting and agents)",
+    ),
 ):
     """List droplets and hibernated snapshots tagged with owner:<username>."""
     try:
@@ -2266,128 +2458,30 @@ def list_droplets(
 
         tag_name = get_user_tag(username)
 
-        console.print(f"[dim]Fetching resources with tag: [cyan]{tag_name}[/cyan][/dim]\n")
+        if not json_output:
+            console.print(f"[dim]Fetching resources with tag: [cyan]{tag_name}[/cyan][/dim]\n")
 
-        # Track total monthly cost across all resources
-        total_monthly_cost = 0.0
-
-        # List droplets
         droplets = api.list_droplets(tag_name=tag_name)
-
-        if droplets:
-            # Create droplets table
-            console.print("[bold]Droplets:[/bold]")
-            table = Table(show_header=True, header_style="bold cyan")
-            table.add_column("Name", style="white", no_wrap=True)
-            table.add_column("Status", style="white", no_wrap=True)
-            table.add_column("IP Address", style="cyan", no_wrap=True)
-            table.add_column("Tailscale IP", style="magenta", no_wrap=True)
-            table.add_column("Region", style="white", no_wrap=True)
-            table.add_column("Size", style="white", no_wrap=True)
-            if cost:
-                table.add_column("Cost", style="green", no_wrap=True, justify="right")
-            table.add_column("SSH", style="white", no_wrap=True)
-
-            # Add rows
-            for droplet in droplets:
-                name = droplet.get("name", "N/A")
-                status = droplet.get("status", "N/A")
-
-                # Get public IP
-                ip_address = "N/A"
-                v4_networks = droplet.get("networks", {}).get("v4", [])
-                for network in v4_networks:
-                    if network.get("type") == "public":
-                        ip_address = network.get("ip_address", "N/A")
-                        break
-
-                region = droplet.get("region", {}).get("slug", "N/A")
-                size = droplet.get("size_slug", "N/A")
-
-                # Get monthly price from the droplet's size object
-                price_monthly = droplet.get("size", {}).get("price_monthly", 0)
-                total_monthly_cost += float(price_monthly)
-
-                # Check if in SSH config and get Tailscale IP
-                ssh_hostname = get_ssh_hostname(name)
-                in_ssh_config = "✓" if host_exists(config.ssh.config_path, ssh_hostname) else "✗"
-                ssh_ip = get_ssh_host_ip(config.ssh.config_path, ssh_hostname)
-                tailscale_ip = ssh_ip if ssh_ip and is_tailscale_ip(ssh_ip) else "—"
-
-                # Color status
-                if status == "active":
-                    status_colored = f"[green]{status}[/green]"
-                elif status == "new":
-                    status_colored = f"[yellow]{status}[/yellow]"
-                else:
-                    status_colored = f"[red]{status}[/red]"
-
-                row = [name, status_colored, ip_address, tailscale_ip, region, size]
-                if cost:
-                    row.append(f"${float(price_monthly):.2f}/mo")
-                row.append(in_ssh_config)
-                table.add_row(*row)
-
-            console.print(table)
-
-        # List hibernated snapshots
         hibernated = get_user_hibernated_snapshots(api, tag_name)
 
-        if hibernated:
-            if droplets:
-                console.print()  # Spacing between tables
-            console.print("[bold]Hibernated:[/bold]")
-            snap_table = Table(show_header=True, header_style="bold cyan")
-            snap_table.add_column("Name", style="white", no_wrap=True)
-            snap_table.add_column("Droplet Size", style="white", no_wrap=True)
-            snap_table.add_column("Image Size", style="white", no_wrap=True)
-            snap_table.add_column("Region", style="white", no_wrap=True)
-            if cost:
-                snap_table.add_column("Cost", style="green", no_wrap=True, justify="right")
+        droplet_records = [build_droplet_record(d, config.ssh.config_path) for d in droplets]
+        hibernated_records = [build_hibernated_record(s) for s in hibernated]
+        total_monthly_cost = sum(r["cost_monthly"] for r in droplet_records) + sum(
+            r["cost_monthly"] for r in hibernated_records
+        )
 
-            for snapshot in hibernated:
-                snapshot_name = snapshot.get("name", "")
-                # Extract droplet name from snapshot name (remove "dropkit-" prefix)
-                droplet_name = get_droplet_name_from_snapshot(snapshot_name) or snapshot_name
-
-                # Extract droplet size slug from size: tag
-                droplet_size = "N/A"
-                for tag in snapshot.get("tags", []):
-                    if tag.startswith("size:"):
-                        droplet_size = tag.removeprefix("size:")
-
-                size_gb = snapshot.get("size_gigabytes", 0)
-                snapshot_cost = float(size_gb) * SNAPSHOT_COST_PER_GB_MONTHLY
-                total_monthly_cost += snapshot_cost
-                regions = snapshot.get("regions", [])
-                region = regions[0] if regions else "N/A"
-
-                row = [droplet_name, droplet_size, f"{size_gb} GB", region]
-                if cost:
-                    row.append(f"${snapshot_cost:.2f}/mo")
-                snap_table.add_row(*row)
-
-            console.print(snap_table)
-            console.print()
-            console.print("[dim]Wake with: dropkit wake <name>[/dim]")
-
-        # Summary
-        if droplets or hibernated:
-            console.print()
-            parts = []
-            if droplets:
-                parts.append(f"{len(droplets)} droplet(s)")
-            if hibernated:
-                parts.append(f"{len(hibernated)} hibernated")
-            summary = f"[dim]Total: {', '.join(parts)}"
-            if cost:
-                summary += f" — [green]${total_monthly_cost:.2f}/mo[/green]"
-            summary += "[/dim]"
-            console.print(summary)
-        else:
-            console.print(
-                f"[yellow]No droplets or hibernated snapshots found with tag: {tag_name}[/yellow]"
+        if json_output:
+            emit_json(
+                {
+                    "tag": tag_name,
+                    "droplets": droplet_records,
+                    "hibernated": hibernated_records,
+                    "total_monthly_cost": round(total_monthly_cost, 2),
+                }
             )
+            return
+
+        render_droplet_list(droplet_records, hibernated_records, total_monthly_cost, cost, tag_name)
 
     except DigitalOceanAPIError as e:
         console.print(f"[red]Error: {e}[/red]")
@@ -2485,7 +2579,10 @@ def config_ssh(
 
 
 @app.command()
-def info(droplet_name: str = typer.Argument(..., autocompletion=complete_droplet_name)):
+def info(
+    droplet_name: str = typer.Argument(..., autocompletion=complete_droplet_name),
+    json_output: bool = typer.Option(False, "--json", help=JSON_HELP),
+):
     """Show detailed information about a droplet."""
     try:
         # Load config and API
@@ -2493,7 +2590,8 @@ def info(droplet_name: str = typer.Argument(..., autocompletion=complete_droplet
         config = config_manager.config
 
         # Find the droplet
-        console.print(f"[dim]Looking for droplet: [cyan]{droplet_name}[/cyan][/dim]\n")
+        if not json_output:
+            console.print(f"[dim]Looking for droplet: [cyan]{droplet_name}[/cyan][/dim]\n")
         droplet, username = find_user_droplet(api, droplet_name)
 
         if not droplet:
@@ -2505,6 +2603,10 @@ def info(droplet_name: str = typer.Argument(..., autocompletion=complete_droplet
         droplet_id = droplet.get("id")
         if droplet_id:
             droplet = api.get_droplet(droplet_id)
+
+        if json_output:
+            emit_json(build_droplet_detail(droplet, config.ssh.config_path))
+            return
 
         # Display information in a nice format
         console.print(
@@ -4350,7 +4452,9 @@ def enable_tailscale(
 
 
 @app.command(name="list-ssh-keys")
-def list_ssh_keys_cmd():
+def list_ssh_keys_cmd(
+    json_output: bool = typer.Option(False, "--json", help=JSON_HELP),
+):
     """List SSH keys registered via dropkit.
 
     Use 'dropkit add-ssh-key' to add or import additional SSH keys.
@@ -4367,12 +4471,22 @@ def list_ssh_keys_cmd():
             raise typer.Exit(1)
 
         # Fetch all SSH keys
-        console.print("[dim]Fetching SSH keys from DigitalOcean...[/dim]\n")
+        if not json_output:
+            console.print("[dim]Fetching SSH keys from DigitalOcean...[/dim]\n")
         all_keys = api.list_ssh_keys()
 
         # Filter keys registered via dropkit (prefixed with dropkit-{username}-)
         prefix = f"dropkit-{username}-"
         dropkit_keys = [key for key in all_keys if key.get("name", "").startswith(prefix)]
+
+        if json_output:
+            emit_json(
+                {
+                    "username": username,
+                    "ssh_keys": [build_ssh_key_record(key) for key in dropkit_keys],
+                }
+            )
+            return
 
         if not dropkit_keys:
             console.print(
@@ -4601,9 +4715,15 @@ def delete_ssh_key_cmd(
 
 
 @app.command()
-def version():
+def version(
+    json_output: bool = typer.Option(False, "--json", help=JSON_HELP),
+):
     """Show the version of dropkit."""
     from dropkit import __version__
+
+    if json_output:
+        emit_json({"version": __version__})
+        return
 
     console.print(f"dropkit version [cyan]{__version__}[/cyan]")
 
