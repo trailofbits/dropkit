@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>dropkit API token helper</title>
+  <style>
+    body {
+      color: #1f2937;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.5;
+      margin: 2rem auto;
+      max-width: 760px;
+      padding: 0 1rem;
+    }
+    a.bookmarklet {
+      background: #0069ff;
+      border-radius: 0.5rem;
+      color: white;
+      display: inline-block;
+      font-weight: 700;
+      margin: 0.5rem 0;
+      padding: 0.65rem 0.9rem;
+      text-decoration: none;
+    }
+    code, pre { background: #f3f4f6; border-radius: 0.25rem; padding: 0.15rem 0.3rem; }
+    li { margin: 0.5rem 0; }
+    .note { background: #eff6ff; border-left: 4px solid #0069ff; padding: 0.75rem 1rem; }
+  </style>
+</head>
+<body>
+  <h1>dropkit API token helper</h1>
+  <p>This page helps you create a DigitalOcean API token with the scopes dropkit needs.</p>
+
+  <h2>Fast scope selection</h2>
+  <ol>
+    <li>Drag <a class="bookmarklet" href="javascript:(async()=&gt;{const NAME=&quot;dropkit-cli&quot;;const SCOPES=[&quot;account:read&quot;,&quot;actions:read&quot;,&quot;droplet:create&quot;,&quot;droplet:read&quot;,&quot;droplet:update&quot;,&quot;droplet:delete&quot;,&quot;image:create&quot;,&quot;image:read&quot;,&quot;image:update&quot;,&quot;image:delete&quot;,&quot;project:read&quot;,&quot;project:update&quot;,&quot;regions:read&quot;,&quot;sizes:read&quot;,&quot;snapshot:read&quot;,&quot;snapshot:delete&quot;,&quot;ssh_key:create&quot;,&quot;ssh_key:read&quot;,&quot;ssh_key:update&quot;,&quot;ssh_key:delete&quot;,&quot;tag:read&quot;,&quot;tag:create&quot;,&quot;vpc:read&quot;];const sleep=ms=&gt;new Promise(r=&gt;setTimeout(r,ms));const all=()=&gt;[...document.querySelectorAll(&#x27;input[type=&quot;checkbox&quot;]&#x27;)];const scopeBoxes=()=&gt;[...document.querySelectorAll(&#x27;input[type=&quot;checkbox&quot;][data-testid=&quot;checkbox-input&quot;]&#x27;)];const find=v=&gt;scopeBoxes().find(i=&gt;i.value===v||i.name===v);const setValue=(i,v)=&gt;{if(!i)return;let d=Object.getOwnPropertyDescriptor(Object.getPrototypeOf(i),&quot;value&quot;);d?.set?d.set.call(i,v):i.value=v;i.dispatchEvent(new Event(&quot;input&quot;,{bubbles:true}));i.dispatchEvent(new Event(&quot;change&quot;,{bubbles:true}))};const tokenName=()=&gt;document.querySelector(&#x27;input#name[name=&quot;name&quot;],input[name=&quot;name&quot;],input#name&#x27;)||[...document.querySelectorAll(&quot;input&quot;)].find(i=&gt;/enter token name|token name/i.test(i.placeholder||&quot;&quot;)||/enter token name|token name/i.test(i.getAttribute(&quot;aria-label&quot;)||&quot;&quot;));const clickOn=i=&gt;{if(i&amp;&amp;!i.checked)i.click()};const clickOff=i=&gt;{if(i&amp;&amp;i.checked)i.click()};setValue(tokenName(),NAME);document.querySelector(&#x27;#scope_type-custom&#x27;)?.click();await sleep(300);all().filter(i=&gt;i.checked).forEach(clickOff);await sleep(500);for(const ns of [...new Set(SCOPES.map(s=&gt;s.split(&#x27;:&#x27;)[0]))]){let top=find(ns);let group=top?.closest(&#x27;div[class*=&quot;GranularScopesPermissionsGroupWrapper&quot;]&#x27;);group?.querySelector(&#x27;button[aria-label=&quot;plus&quot;]&#x27;)?.click();await sleep(150)}let missing=[];for(const s of SCOPES){let i=find(s);if(!i&amp;&amp;s.endsWith(&#x27;:read&#x27;))i=find(s.split(&#x27;:&#x27;)[0]);if(i)clickOn(i);else missing.push(s)}if(missing.length)alert(&quot;Could not find scopes:\n&quot;+missing.join(&quot;\n&quot;));})()">dropkit scopes</a> to your bookmarks bar.</li>
+    <li>Open the <a href="https://cloud.digitalocean.com/account/api/tokens/new" target="_blank" rel="noopener noreferrer">DigitalOcean API token creation page</a>.</li>
+    <li>Click the <strong>dropkit scopes</strong> bookmark you just created.</li>
+    <li>It fills in the token name <code>dropkit-cli</code> and selects the required custom scopes.</li>
+    <li>Review the selected scopes. There should be <strong>23 selected scopes</strong>, then click <strong>Generate Token</strong>.</li>
+    <li>Copy the token and paste it into <code>dropkit init</code>.</li>
+  </ol>
+
+  <p class="note">If your browser hides the bookmarks bar, enable it first, then drag the blue link above into it.</p>
+</body>
+</html>

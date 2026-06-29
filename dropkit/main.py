@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import time
+import webbrowser
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -45,6 +46,7 @@ console = Console()
 # DigitalOcean snapshot storage rate: $0.06/GB/month
 # https://docs.digitalocean.com/products/snapshots/details/pricing/
 SNAPSHOT_COST_PER_GB_MONTHLY = 0.06
+TOKEN_HELPER_PATH = Path(__file__).parent / "templates" / "token-helper.html"
 
 
 @app.callback()
@@ -1657,6 +1659,17 @@ def init(
 
     # Prompt for DigitalOcean API token
     console.print("\n[bold]DigitalOcean API Token[/bold]")
+    console.print(
+        "Need a token? dropkit can show a helper page for quickly selecting the "
+        "minimum required scopes."
+    )
+    if Confirm.ask("[cyan]Open token helper page in your browser?[/cyan]", default=True):
+        helper_url = TOKEN_HELPER_PATH.resolve().as_uri()
+        if webbrowser.open(helper_url):
+            console.print("[green]✓[/green] Opened token helper page in your browser")
+        else:
+            console.print("[yellow]Could not open your browser automatically.[/yellow]")
+            console.print(f"Open this URL manually: [cyan]{helper_url}[/cyan]")
     console.print("Get your token from: https://cloud.digitalocean.com/account/api/tokens")
     token = Prompt.ask("[cyan]Enter your DO API token[/cyan]", password=True)
 
