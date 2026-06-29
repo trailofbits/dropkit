@@ -259,6 +259,10 @@ Optional environment variable overrides: `DROPLET_NAME`, `DROPLET_REGION`,
 
 ### Creating Your Token
 
+Run `dropkit init`; it can open a helper page for quickly selecting the minimum required scopes.
+
+**Manual approach:**
+
 1. Go to [DigitalOcean API Tokens](https://cloud.digitalocean.com/account/api/tokens)
 2. Click **Generate New Token** with name "dropkit-cli"
 3. Select **Custom Scopes** (recommended) or **Full Access** (simpler)
