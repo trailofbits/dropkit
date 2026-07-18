@@ -129,6 +129,11 @@ dropkit list-ssh-keys --json | jq -r '.ssh_keys[].fingerprint'
   `name`/`id`/`fingerprint`.
 - **`version --json`** — the dropkit `version` string.
 
+On failure, `--json` keeps `stdout` a clean JSON stream: the error is written to
+`stderr` as `{"error": "..."}` and the command exits non-zero. Numeric fields are
+`null` when the value is unknown (e.g. `cost_monthly` is `null` for a size with no
+price, distinct from `0` for a genuinely free resource).
+
 ## Configuration
 
 Configuration files are stored in `~/.config/dropkit/`:

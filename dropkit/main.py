@@ -41,6 +41,7 @@ app = typer.Typer(
     help="Manage DigitalOcean droplets for ToB engineers",
 )
 console = Console()
+err_console = Console(stderr=True)
 
 # DigitalOcean snapshot storage rate: $0.06/GB/month
 # https://docs.digitalocean.com/products/snapshots/details/pricing/
@@ -51,7 +52,19 @@ JSON_HELP = "Emit machine-readable JSON instead of formatted output (for scripti
 
 def emit_json(payload: Any) -> None:
     """Print a payload as formatted JSON on stdout for scripting and agents."""
-    console.print_json(json.dumps(payload))
+    console.print_json(data=payload)
+
+
+def emit_error(message: str, *, json_output: bool) -> None:
+    """Report an error on stderr, honoring JSON mode.
+
+    In JSON mode, emit a ``{"error": ...}`` object so stdout stays a clean JSON
+    stream for consumers piping to ``jq``. Otherwise print a red message.
+    """
+    if json_output:
+        err_console.print_json(data={"error": message})
+    else:
+        err_console.print(f"[red]Error: {message}[/red]")
 
 
 @app.callback()
@@ -2253,16 +2266,70 @@ def create(
         raise typer.Exit(1)
 
 
+@app.command(name="list")
+@app.command(name="ls", hidden=True)
+def list_droplets(
+    cost: bool = typer.Option(True, "--cost/--no-cost", help="Show monthly cost column"),
+    json_output: bool = typer.Option(False, "--json", help=JSON_HELP),
+):
+    """List droplets and hibernated snapshots tagged with owner:<username>."""
+    try:
+        # Load config and API
+        config_manager, api = load_config_and_api()
+        config = config_manager.config
+
+        # Get username from DigitalOcean for tag filtering
+        try:
+            username = api.get_username()
+        except DigitalOceanAPIError as e:
+            emit_error(f"fetching username from DigitalOcean: {e}", json_output=json_output)
+            raise typer.Exit(1)
+
+        tag_name = get_user_tag(username)
+
+        if not json_output:
+            console.print(f"[dim]Fetching resources with tag: [cyan]{tag_name}[/cyan][/dim]\n")
+
+        droplets = api.list_droplets(tag_name=tag_name)
+        hibernated = get_user_hibernated_snapshots(api, tag_name)
+
+        droplet_records = [build_droplet_record(d, config.ssh.config_path) for d in droplets]
+        hibernated_records = [build_hibernated_record(s) for s in hibernated]
+        total_monthly_cost = sum(r["cost_monthly"] or 0 for r in droplet_records) + sum(
+            r["cost_monthly"] or 0 for r in hibernated_records
+        )
+
+        if json_output:
+            emit_json(
+                {
+                    "tag": tag_name,
+                    "droplets": droplet_records,
+                    "hibernated": hibernated_records,
+                    "total_monthly_cost": round(total_monthly_cost, 2),
+                }
+            )
+            return
+
+        render_droplet_list(droplet_records, hibernated_records, total_monthly_cost, cost, tag_name)
+
+    except DigitalOceanAPIError as e:
+        emit_error(str(e), json_output=json_output)
+        raise typer.Exit(1)
+
+
 def build_droplet_record(droplet: dict[str, Any], ssh_config_path: str) -> dict[str, Any]:
     """Extract the agent-relevant fields from a raw droplet API object.
 
     Missing values are represented as ``None`` rather than placeholder strings
-    so JSON consumers can branch on them cleanly.
+    so JSON consumers can branch on them cleanly. The one exception is ``name``,
+    which falls back to an empty string because it seeds the SSH hostname.
+    ``cost_monthly`` stays ``None`` when the size carries no price, so a genuine
+    ``$0`` resource is distinguishable from one with an unknown price.
     """
     name = droplet.get("name", "")
 
     ip_address = None
-    for network in droplet.get("networks", {}).get("v4", []):
+    for network in (droplet.get("networks") or {}).get("v4", []):
         if network.get("type") == "public":
             ip_address = network.get("ip_address")
             break
@@ -2272,15 +2339,17 @@ def build_droplet_record(droplet: dict[str, Any], ssh_config_path: str) -> dict[
     ssh_ip = get_ssh_host_ip(ssh_config_path, ssh_hostname)
     tailscale_ip = ssh_ip if ssh_ip and is_tailscale_ip(ssh_ip) else None
 
+    price_monthly = (droplet.get("size") or {}).get("price_monthly")
+
     return {
         "id": droplet.get("id"),
         "name": name,
         "status": droplet.get("status"),
         "ip": ip_address,
         "tailscale_ip": tailscale_ip,
-        "region": droplet.get("region", {}).get("slug"),
+        "region": (droplet.get("region") or {}).get("slug"),
         "size": droplet.get("size_slug"),
-        "cost_monthly": float(droplet.get("size", {}).get("price_monthly", 0)),
+        "cost_monthly": float(price_monthly) if price_monthly is not None else None,
         "in_ssh_config": in_ssh_config,
         "ssh_hostname": ssh_hostname,
         "tags": droplet.get("tags", []),
@@ -2317,8 +2386,8 @@ def build_droplet_detail(droplet: dict[str, Any], ssh_config_path: str) -> dict[
     timestamps, and full network data (including IPv6).
     """
     record = build_droplet_record(droplet, ssh_config_path)
-    size = droplet.get("size", {})
-    image = droplet.get("image", {})
+    size = droplet.get("size") or {}
+    image = droplet.get("image") or {}
     record.update(
         {
             "created_at": droplet.get("created_at"),
@@ -2347,6 +2416,92 @@ def build_ssh_key_record(key: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _format_cost(cost_monthly: float | None) -> str:
+    """Format a monthly cost, showing ``N/A`` when the price is unknown."""
+    return f"${cost_monthly:.2f}/mo" if cost_monthly is not None else "N/A"
+
+
+def _render_active_droplets(droplets: list[dict[str, Any]], cost: bool) -> None:
+    """Render the active-droplet table."""
+    status_colors = {"active": "green", "new": "yellow"}
+
+    console.print("[bold]Droplets:[/bold]")
+    table = Table(show_header=True, header_style="bold cyan")
+    table.add_column("Name", style="white", no_wrap=True)
+    table.add_column("Status", style="white", no_wrap=True)
+    table.add_column("IP Address", style="cyan", no_wrap=True)
+    table.add_column("Tailscale IP", style="magenta", no_wrap=True)
+    table.add_column("Region", style="white", no_wrap=True)
+    table.add_column("Size", style="white", no_wrap=True)
+    if cost:
+        table.add_column("Cost", style="green", no_wrap=True, justify="right")
+    table.add_column("SSH", style="white", no_wrap=True)
+
+    for d in droplets:
+        status = d["status"] or "N/A"
+        color = status_colors.get(status, "red")
+        row = [
+            d["name"],
+            f"[{color}]{status}[/{color}]",
+            d["ip"] or "N/A",
+            d["tailscale_ip"] or "—",
+            d["region"] or "N/A",
+            d["size"] or "N/A",
+        ]
+        if cost:
+            row.append(_format_cost(d["cost_monthly"]))
+        row.append("✓" if d["in_ssh_config"] else "✗")
+        table.add_row(*row)
+
+    console.print(table)
+
+
+def _render_hibernated(hibernated: list[dict[str, Any]], cost: bool) -> None:
+    """Render the hibernated-snapshot table."""
+    console.print("[bold]Hibernated:[/bold]")
+    snap_table = Table(show_header=True, header_style="bold cyan")
+    snap_table.add_column("Name", style="white", no_wrap=True)
+    snap_table.add_column("Droplet Size", style="white", no_wrap=True)
+    snap_table.add_column("Image Size", style="white", no_wrap=True)
+    snap_table.add_column("Region", style="white", no_wrap=True)
+    if cost:
+        snap_table.add_column("Cost", style="green", no_wrap=True, justify="right")
+
+    for s in hibernated:
+        row = [
+            s["name"],
+            s["droplet_size"] or "N/A",
+            f"{s['image_size_gb']:g} GB",
+            s["region"] or "N/A",
+        ]
+        if cost:
+            row.append(_format_cost(s["cost_monthly"]))
+        snap_table.add_row(*row)
+
+    console.print(snap_table)
+    console.print()
+    console.print("[dim]Wake with: dropkit wake <name>[/dim]")
+
+
+def _render_list_summary(
+    droplets: list[dict[str, Any]],
+    hibernated: list[dict[str, Any]],
+    total_monthly_cost: float,
+    cost: bool,
+) -> None:
+    """Render the trailing summary line for the droplet list."""
+    parts = []
+    if droplets:
+        parts.append(f"{len(droplets)} droplet(s)")
+    if hibernated:
+        parts.append(f"{len(hibernated)} hibernated")
+    summary = f"[dim]Total: {', '.join(parts)}"
+    if cost:
+        summary += f" — [green]${total_monthly_cost:.2f}/mo[/green]"
+    summary += "[/dim]"
+    console.print(summary)
+
+
 def render_droplet_list(
     droplets: list[dict[str, Any]],
     hibernated: list[dict[str, Any]],
@@ -2355,137 +2510,22 @@ def render_droplet_list(
     tag_name: str,
 ) -> None:
     """Render droplet and hibernated-snapshot records as Rich tables."""
-    status_colors = {"active": "green", "new": "yellow"}
+    if not droplets and not hibernated:
+        console.print(
+            f"[yellow]No droplets or hibernated snapshots found with tag: {tag_name}[/yellow]"
+        )
+        return
 
     if droplets:
-        console.print("[bold]Droplets:[/bold]")
-        table = Table(show_header=True, header_style="bold cyan")
-        table.add_column("Name", style="white", no_wrap=True)
-        table.add_column("Status", style="white", no_wrap=True)
-        table.add_column("IP Address", style="cyan", no_wrap=True)
-        table.add_column("Tailscale IP", style="magenta", no_wrap=True)
-        table.add_column("Region", style="white", no_wrap=True)
-        table.add_column("Size", style="white", no_wrap=True)
-        if cost:
-            table.add_column("Cost", style="green", no_wrap=True, justify="right")
-        table.add_column("SSH", style="white", no_wrap=True)
-
-        for d in droplets:
-            status = d["status"] or "N/A"
-            color = status_colors.get(status, "red")
-            row = [
-                d["name"],
-                f"[{color}]{status}[/{color}]",
-                d["ip"] or "N/A",
-                d["tailscale_ip"] or "—",
-                d["region"] or "N/A",
-                d["size"] or "N/A",
-            ]
-            if cost:
-                row.append(f"${d['cost_monthly']:.2f}/mo")
-            row.append("✓" if d["in_ssh_config"] else "✗")
-            table.add_row(*row)
-
-        console.print(table)
+        _render_active_droplets(droplets, cost)
 
     if hibernated:
         if droplets:
             console.print()  # Spacing between tables
-        console.print("[bold]Hibernated:[/bold]")
-        snap_table = Table(show_header=True, header_style="bold cyan")
-        snap_table.add_column("Name", style="white", no_wrap=True)
-        snap_table.add_column("Droplet Size", style="white", no_wrap=True)
-        snap_table.add_column("Image Size", style="white", no_wrap=True)
-        snap_table.add_column("Region", style="white", no_wrap=True)
-        if cost:
-            snap_table.add_column("Cost", style="green", no_wrap=True, justify="right")
+        _render_hibernated(hibernated, cost)
 
-        for s in hibernated:
-            row = [
-                s["name"],
-                s["droplet_size"] or "N/A",
-                f"{s['image_size_gb']:g} GB",
-                s["region"] or "N/A",
-            ]
-            if cost:
-                row.append(f"${s['cost_monthly']:.2f}/mo")
-            snap_table.add_row(*row)
-
-        console.print(snap_table)
-        console.print()
-        console.print("[dim]Wake with: dropkit wake <name>[/dim]")
-
-    if droplets or hibernated:
-        console.print()
-        parts = []
-        if droplets:
-            parts.append(f"{len(droplets)} droplet(s)")
-        if hibernated:
-            parts.append(f"{len(hibernated)} hibernated")
-        summary = f"[dim]Total: {', '.join(parts)}"
-        if cost:
-            summary += f" — [green]${total_monthly_cost:.2f}/mo[/green]"
-        summary += "[/dim]"
-        console.print(summary)
-    else:
-        console.print(
-            f"[yellow]No droplets or hibernated snapshots found with tag: {tag_name}[/yellow]"
-        )
-
-
-@app.command(name="list")
-@app.command(name="ls", hidden=True)
-def list_droplets(
-    cost: bool = typer.Option(True, "--cost/--no-cost", help="Show monthly cost column"),
-    json_output: bool = typer.Option(
-        False,
-        "--json",
-        help="Emit machine-readable JSON instead of a table (for scripting and agents)",
-    ),
-):
-    """List droplets and hibernated snapshots tagged with owner:<username>."""
-    try:
-        # Load config and API
-        config_manager, api = load_config_and_api()
-        config = config_manager.config
-
-        # Get username from DigitalOcean for tag filtering
-        try:
-            username = api.get_username()
-        except DigitalOceanAPIError as e:
-            console.print(f"[red]Error fetching username from DigitalOcean: {e}[/red]")
-            raise typer.Exit(1)
-
-        tag_name = get_user_tag(username)
-
-        if not json_output:
-            console.print(f"[dim]Fetching resources with tag: [cyan]{tag_name}[/cyan][/dim]\n")
-
-        droplets = api.list_droplets(tag_name=tag_name)
-        hibernated = get_user_hibernated_snapshots(api, tag_name)
-
-        droplet_records = [build_droplet_record(d, config.ssh.config_path) for d in droplets]
-        hibernated_records = [build_hibernated_record(s) for s in hibernated]
-        total_monthly_cost = sum(r["cost_monthly"] for r in droplet_records) + sum(
-            r["cost_monthly"] for r in hibernated_records
-        )
-
-        if json_output:
-            emit_json(
-                {
-                    "tag": tag_name,
-                    "droplets": droplet_records,
-                    "hibernated": hibernated_records,
-                    "total_monthly_cost": round(total_monthly_cost, 2),
-                }
-            )
-            return
-
-        render_droplet_list(droplet_records, hibernated_records, total_monthly_cost, cost, tag_name)
-
-    except DigitalOceanAPIError as e:
-        console.print(f"[red]Error: {e}[/red]")
-        raise typer.Exit(1)
+    console.print()
+    _render_list_summary(droplets, hibernated, total_monthly_cost, cost)
 
 
 @app.command()
@@ -2596,7 +2636,9 @@ def info(
 
         if not droplet:
             tag = get_user_tag(username)
-            console.print(f"[red]Error: Droplet '{droplet_name}' not found with tag {tag}[/red]")
+            emit_error(
+                f"Droplet '{droplet_name}' not found with tag {tag}", json_output=json_output
+            )
             raise typer.Exit(1)
 
         # Get detailed droplet info
@@ -2728,7 +2770,7 @@ def info(
             console.print(f"  [dim]Manual SSH: ssh root@{public_ip}[/dim]")
 
     except DigitalOceanAPIError as e:
-        console.print(f"[red]Error: {e}[/red]")
+        emit_error(str(e), json_output=json_output)
         raise typer.Exit(1)
 
 
@@ -4467,7 +4509,7 @@ def list_ssh_keys_cmd(
         try:
             username = api.get_username()
         except DigitalOceanAPIError as e:
-            console.print(f"[red]Error fetching username from DigitalOcean: {e}[/red]")
+            emit_error(f"fetching username from DigitalOcean: {e}", json_output=json_output)
             raise typer.Exit(1)
 
         # Fetch all SSH keys
@@ -4515,7 +4557,7 @@ def list_ssh_keys_cmd(
         console.print(f"\n[dim]Total: {len(dropkit_keys)} key(s)[/dim]")
 
     except DigitalOceanAPIError as e:
-        console.print(f"[red]Error: {e}[/red]")
+        emit_error(str(e), json_output=json_output)
         raise typer.Exit(1)
 
 
