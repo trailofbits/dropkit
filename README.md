@@ -43,12 +43,12 @@ Run the initialization wizard:
 dropkit init
 ```
 
-This will validate your DigitalOcean API token, detect SSH keys, register them with DigitalOcean, and let you choose defaults (type `?` for help to see available options).
+This will validate your DigitalOcean API token, detect SSH keys, register them with DigitalOcean, and let you choose defaults (type `?` to list the available options).
 
 ### 2. Create Your First Droplet
 
 ```bash
-# Interactive mode - prompts for name, region, size, image (type ? for help)
+# Interactive mode - prompts for name, region, size, image (type ? to list options)
 dropkit create
 
 # Or specify the name and use defaults
@@ -106,6 +106,17 @@ Commands:
 ```
 
 Use `dropkit <command> --help` for detailed help on any command.
+
+## Listing and filtering options
+
+At any region, size, image, or project prompt, `?` lists the available choices.
+For sizes there are around 200, so the list can be narrowed by comparing `mem`,
+`cpu`, `disk`, `transfer` or `price` against `>=`, `<=`, `>`, `<` or `=`. Terms
+are ANDed.
+
+```
+Size (? to list, ?<filter> to narrow) [s-1vcpu-1gb]: cpu>=8 mem>=32 price<=300
+```
 
 ## Configuration
 
