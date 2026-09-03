@@ -6,10 +6,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 import typer
 
+from dropkit.api import DigitalOceanAPIError
 from dropkit.main import (
     _resize_hibernated_snapshot,
     add_temporary_ssh_rule,
     build_droplet_tags,
+    build_wake_user_data,
     complete_droplet_or_snapshot_name,
     find_snapshot_action,
     get_droplet_name_from_snapshot,
@@ -18,6 +20,7 @@ from dropkit.main import (
     get_user_tag,
     is_droplet_tailscale_locked,
     prepare_for_hibernate,
+    wait_for_ssh,
 )
 
 
@@ -332,10 +335,10 @@ class TestPrepareForHibernate:
     @patch("dropkit.main.tailscale_logout")
     @patch("dropkit.main.add_temporary_ssh_rule")
     @patch("dropkit.main.add_ssh_host")
-    def test_temp_rule_failure_skips_logout(
+    def test_temp_rule_failure_aborts(
         self, mock_add_ssh_host, mock_add_temp_rule, mock_logout, temp_ssh_config
     ):
-        """Test returns True but skips logout if temp rule fails (safety)."""
+        """Test returns None to abort hibernate if temp rule fails."""
         # Create SSH config with Tailscale IP
         Path(temp_ssh_config).write_text("""Host dropkit.myvm
     HostName 100.80.123.45
@@ -355,11 +358,98 @@ class TestPrepareForHibernate:
 
         result = prepare_for_hibernate(mock_config, mock_api, mock_droplet, "myvm")
 
-        # Should still return True because we detected Tailscale lockdown
-        assert result is True
-        # But logout should NOT be called (safety - need public IP fallback first)
+        # Should return None to signal failure and abort hibernate
+        assert result is None
+        # Logout should NOT be called
         mock_logout.assert_not_called()
-        # And SSH config should NOT be updated (early return)
+        # SSH config should NOT be updated
+        mock_add_ssh_host.assert_not_called()
+
+    @patch("dropkit.main.tailscale_logout")
+    @patch("dropkit.main.add_temporary_ssh_rule")
+    @patch("dropkit.main.add_ssh_host")
+    def test_missing_public_ip_aborts(
+        self, mock_add_ssh_host, mock_add_temp_rule, mock_logout, temp_ssh_config
+    ):
+        """Test returns None to abort hibernate if no public IP found."""
+        Path(temp_ssh_config).write_text("""Host dropkit.myvm
+    HostName 100.80.123.45
+    User ubuntu
+""")
+
+        mock_config = MagicMock()
+        mock_config.ssh.config_path = temp_ssh_config
+        mock_config.ssh.identity_file = "~/.ssh/id_ed25519"
+
+        mock_api = MagicMock()
+
+        # Droplet with no public IPv4 network
+        mock_droplet = {"networks": {"v4": [{"type": "private", "ip_address": "10.0.0.1"}]}}
+
+        mock_add_temp_rule.return_value = True
+
+        result = prepare_for_hibernate(mock_config, mock_api, mock_droplet, "myvm")
+
+        assert result is None
+        mock_logout.assert_not_called()
+        mock_add_ssh_host.assert_not_called()
+
+    @patch("dropkit.main.tailscale_logout")
+    @patch("dropkit.main.add_temporary_ssh_rule")
+    @patch("dropkit.main.add_ssh_host")
+    def test_ssh_config_update_failure_aborts(
+        self, mock_add_ssh_host, mock_add_temp_rule, mock_logout, temp_ssh_config
+    ):
+        """Test returns None to abort hibernate if SSH config update fails."""
+        Path(temp_ssh_config).write_text("""Host dropkit.myvm
+    HostName 100.80.123.45
+    User ubuntu
+""")
+
+        mock_config = MagicMock()
+        mock_config.ssh.config_path = temp_ssh_config
+        mock_config.ssh.identity_file = "~/.ssh/id_ed25519"
+
+        mock_api = MagicMock()
+        mock_api.get_username.return_value = "testuser"
+
+        mock_droplet = {"networks": {"v4": [{"type": "public", "ip_address": "203.0.113.50"}]}}
+
+        mock_add_temp_rule.return_value = True
+        mock_add_ssh_host.side_effect = OSError("Permission denied")
+
+        result = prepare_for_hibernate(mock_config, mock_api, mock_droplet, "myvm")
+
+        assert result is None
+        mock_logout.assert_not_called()
+
+    @patch("dropkit.main.tailscale_logout")
+    @patch("dropkit.main.add_temporary_ssh_rule")
+    @patch("dropkit.main.add_ssh_host")
+    def test_ssh_config_api_failure_aborts(
+        self, mock_add_ssh_host, mock_add_temp_rule, mock_logout, temp_ssh_config
+    ):
+        """Test returns None to abort hibernate if API call for username fails."""
+        Path(temp_ssh_config).write_text("""Host dropkit.myvm
+    HostName 100.80.123.45
+    User ubuntu
+""")
+
+        mock_config = MagicMock()
+        mock_config.ssh.config_path = temp_ssh_config
+        mock_config.ssh.identity_file = "~/.ssh/id_ed25519"
+
+        mock_api = MagicMock()
+        mock_api.get_username.side_effect = DigitalOceanAPIError("API timeout")
+
+        mock_droplet = {"networks": {"v4": [{"type": "public", "ip_address": "203.0.113.50"}]}}
+
+        mock_add_temp_rule.return_value = True
+
+        result = prepare_for_hibernate(mock_config, mock_api, mock_droplet, "myvm")
+
+        assert result is None
+        mock_logout.assert_not_called()
         mock_add_ssh_host.assert_not_called()
 
 
@@ -460,3 +550,66 @@ class TestCompleteDropletOrSnapshotName:
         """Test that live droplet names appear before snapshot names."""
         result = complete_droplet_or_snapshot_name("")
         assert result.index("live-vm") < result.index("snap-vm")
+
+
+class TestBuildWakeUserData:
+    """Tests for build_wake_user_data function."""
+
+    def test_returns_script_when_tailscale_locked(self):
+        """Test that a cloud-init script is returned for Tailscale-locked snapshots."""
+        result = build_wake_user_data(was_tailscale_locked=True)
+        assert result is not None
+        assert result.startswith("#!/bin/bash\n")
+        assert "ufw allow in on eth0 to any port 22" in result
+
+    def test_returns_none_when_not_tailscale_locked(self):
+        """Test that None is returned when snapshot was not Tailscale-locked."""
+        result = build_wake_user_data(was_tailscale_locked=False)
+        assert result is None
+
+
+class TestWaitForSsh:
+    """Tests for wait_for_ssh function."""
+
+    @patch("dropkit.main.subprocess.run")
+    @patch("dropkit.main.time.monotonic")
+    @patch("dropkit.main.time.sleep")
+    def test_returns_true_on_immediate_success(self, mock_sleep, mock_monotonic, mock_run):
+        """Test that wait_for_ssh returns True when SSH is immediately reachable."""
+        mock_monotonic.side_effect = [0, 0]  # start, first check
+        mock_run.return_value = MagicMock(returncode=0)
+        assert wait_for_ssh("dropkit.test", timeout=10) is True
+
+    @patch("dropkit.main.subprocess.run")
+    @patch("dropkit.main.time.monotonic")
+    @patch("dropkit.main.time.sleep")
+    def test_returns_true_after_retries(self, mock_sleep, mock_monotonic, mock_run):
+        """Test that wait_for_ssh retries and succeeds on second attempt."""
+        mock_monotonic.side_effect = [0, 0, 5, 5]  # start, fail check, sleep check, success check
+        mock_run.side_effect = [
+            MagicMock(returncode=255),  # first attempt fails
+            MagicMock(returncode=0),  # second attempt succeeds
+        ]
+        assert wait_for_ssh("dropkit.test", timeout=60) is True
+
+    @patch("dropkit.main.subprocess.run")
+    @patch("dropkit.main.time.monotonic")
+    @patch("dropkit.main.time.sleep")
+    def test_returns_false_on_timeout(self, mock_sleep, mock_monotonic, mock_run):
+        """Test that wait_for_ssh returns False when timeout is exceeded."""
+        # deadline calc, while check, remaining check, while check (past deadline)
+        mock_monotonic.side_effect = [0, 0, 5, 61]
+        mock_run.return_value = MagicMock(returncode=255)
+        assert wait_for_ssh("dropkit.test", timeout=60) is False
+
+    @patch("dropkit.main.subprocess.run")
+    @patch("dropkit.main.time.monotonic")
+    @patch("dropkit.main.time.sleep")
+    def test_handles_timeout_exception(self, mock_sleep, mock_monotonic, mock_run):
+        """Test that subprocess.TimeoutExpired is caught and retried."""
+        import subprocess
+
+        # deadline calc, while check, remaining check, while check (past deadline)
+        mock_monotonic.side_effect = [0, 0, 5, 61]
+        mock_run.side_effect = subprocess.TimeoutExpired("ssh", 10)
+        assert wait_for_ssh("dropkit.test", timeout=60) is False

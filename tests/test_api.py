@@ -162,3 +162,42 @@ class TestUntagResource:
         api = DigitalOceanAPI("fake-token")
         with pytest.raises(ValueError, match="Cannot remove protected tag: firewall"):
             api.untag_resource("firewall", "12345", "droplet")
+
+
+class TestCreateDropletFromSnapshot:
+    """Tests for create_droplet_from_snapshot method."""
+
+    @patch.object(DigitalOceanAPI, "_request")
+    def test_with_user_data(self, mock_request):
+        """Test that user_data is included in the API payload when provided."""
+        mock_request.return_value = {"droplet": {"id": 123}}
+        api = DigitalOceanAPI("fake-token")
+
+        api.create_droplet_from_snapshot(
+            name="test",
+            region="nyc3",
+            size="s-1vcpu-1gb",
+            snapshot_id=456,
+            tags=["owner:test"],
+            user_data="#!/bin/bash\nufw allow in on eth0 to any port 22\n",
+        )
+
+        payload = mock_request.call_args[1]["json"]
+        assert payload["user_data"] == "#!/bin/bash\nufw allow in on eth0 to any port 22\n"
+
+    @patch.object(DigitalOceanAPI, "_request")
+    def test_without_user_data(self, mock_request):
+        """Test that user_data is omitted from payload when not provided."""
+        mock_request.return_value = {"droplet": {"id": 123}}
+        api = DigitalOceanAPI("fake-token")
+
+        api.create_droplet_from_snapshot(
+            name="test",
+            region="nyc3",
+            size="s-1vcpu-1gb",
+            snapshot_id=456,
+            tags=["owner:test"],
+        )
+
+        payload = mock_request.call_args[1]["json"]
+        assert "user_data" not in payload
