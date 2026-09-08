@@ -8,7 +8,8 @@ import pytest
 from typer.testing import CliRunner
 
 from dropkit.api import DigitalOceanAPI, DigitalOceanAPIError, DropletWaitTimeoutError
-from dropkit.main import app
+from dropkit.main import app, setup_tailscale
+from dropkit.ssh_config import add_ssh_host, get_ssh_host_ip
 
 runner = CliRunner()
 
@@ -55,7 +56,13 @@ def wake_env(tmp_path):
         vpn = stack.enter_context(patch("dropkit.main.setup_tailscale", return_value="100.64.0.1"))
         stack.enter_context(patch("dropkit.main.time.sleep"))
         yield SimpleNamespace(
-            api=api, snapshot=snapshot, droplet=droplet, find=find, ssh=ssh, vpn=vpn
+            api=api,
+            snapshot=snapshot,
+            droplet=droplet,
+            find=find,
+            ssh=ssh,
+            vpn=vpn,
+            config=config,
         )
 
 
@@ -111,6 +118,68 @@ def test_resume_no_tailscale(wake_env):
     result = runner.invoke(app, ["wake", "test-droplet", "--no-tailscale"], input="no\n")
     assert result.exit_code == 0, result.output
     env.vpn.assert_not_called()
+
+
+@pytest.mark.parametrize("no_tailscale", [False, True])
+def test_retry_after_firewall_lockdown_preserves_tailscale_ssh(wake_env, tmp_path, no_tailscale):
+    env = wake_env
+    env.config.ssh.config_path = str(tmp_path / "ssh_config")
+    env.config.tailscale = SimpleNamespace(lock_down_firewall=True)
+    env.snapshot["tags"].append("tailscale-lockdown")
+    env.ssh.side_effect = add_ssh_host
+    env.vpn.side_effect = setup_tailscale
+    locked = False
+    addresses = []
+
+    def connect(ssh_hostname, verbose):
+        """Simulate an authenticated node that rejects public SSH after lockdown."""
+        address = get_ssh_host_ip(env.config.ssh.config_path, ssh_hostname)
+        addresses.append(address)
+        assert address == ("100.64.0.1" if locked else "192.0.2.1")
+
+    def lockdown(ssh_hostname, verbose):
+        nonlocal locked
+        assert get_ssh_host_ip(env.config.ssh.config_path, ssh_hostname) == "100.64.0.1"
+        locked = True
+        return True
+
+    with (
+        patch("dropkit.main.run_tailscale_up", side_effect=connect),
+        patch("dropkit.main.wait_for_tailscale_ip", return_value="100.64.0.1"),
+        patch("dropkit.main.check_local_tailscale", return_value=True),
+        patch("dropkit.main.lock_down_to_tailscale", side_effect=lockdown),
+        patch("dropkit.main.verify_tailscale_ssh", return_value=True),
+    ):
+        with patch("dropkit.main.Prompt.ask", side_effect=KeyboardInterrupt):
+            result = runner.invoke(app, ["wake", "test-droplet"])
+        assert result.exit_code == 130, result.output
+        assert locked
+        env.api.delete_snapshot.assert_not_called()
+        assert get_ssh_host_ip(env.config.ssh.config_path, "dropkit.test-droplet") == "100.64.0.1"
+
+        env.find.return_value = (env.droplet, "testuser")
+        args = ["wake", "test-droplet"]
+        if no_tailscale:
+            args.append("--no-tailscale")
+        result = runner.invoke(app, args, input="yes\n")
+
+    assert result.exit_code == 0, result.output
+    assert addresses == (["192.0.2.1"] if no_tailscale else ["192.0.2.1", "100.64.0.1"])
+    assert get_ssh_host_ip(env.config.ssh.config_path, "dropkit.test-droplet") == "100.64.0.1"
+    env.api.create_droplet_from_snapshot.assert_called_once()
+    env.api.delete_snapshot.assert_called_once_with(456)
+
+
+def test_fresh_restore_replaces_stale_tailscale_ssh(wake_env, tmp_path):
+    env = wake_env
+    env.config.ssh.config_path = str(tmp_path / "ssh_config")
+    add_ssh_host(env.config.ssh.config_path, "dropkit.test-droplet", "100.64.0.2", "testuser")
+    env.ssh.side_effect = add_ssh_host
+
+    result = runner.invoke(app, ["wake", "test-droplet"], input="no\n")
+
+    assert result.exit_code == 0, result.output
+    assert get_ssh_host_ip(env.config.ssh.config_path, "dropkit.test-droplet") == "192.0.2.1"
 
 
 @pytest.mark.parametrize("image", [{"id": 999}, {}, {"id": None}])

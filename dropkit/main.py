@@ -4050,7 +4050,7 @@ def wake(
 
     If the original droplet had Tailscale lockdown enabled, this command will
     re-setup Tailscale after the droplet becomes active. Use --no-tailscale to
-    skip this and keep public SSH access.
+    skip this. When resuming, existing Tailscale SSH access is preserved.
 
     Use 'dropkit destroy <name>' to delete a hibernated snapshot without restoring.
     """
@@ -4222,14 +4222,18 @@ def wake(
             try:
                 console.print("[dim]Configuring SSH...[/dim]")
                 ssh_hostname = get_ssh_hostname(droplet_name)
-                add_ssh_host(
-                    config_path=config.ssh.config_path,
-                    host_name=ssh_hostname,
-                    hostname=ip_address,
-                    user=username,
-                    identity_file=config.ssh.identity_file,
-                )
-                console.print("[green]✓[/green] SSH config updated")
+                if existing_droplet and is_droplet_tailscale_locked(config, droplet_name):
+                    # A previous wake may have blocked public SSH before being interrupted.
+                    console.print("[green]✓[/green] Preserved Tailscale SSH config")
+                else:
+                    add_ssh_host(
+                        config_path=config.ssh.config_path,
+                        host_name=ssh_hostname,
+                        hostname=ip_address,
+                        user=username,
+                        identity_file=config.ssh.identity_file,
+                    )
+                    console.print("[green]✓[/green] SSH config updated")
             except Exception as e:
                 console.print(f"[red]Could not update SSH config: {e}[/red]")
                 console.print(
@@ -4244,10 +4248,7 @@ def wake(
             if no_tailscale:
                 console.print()
                 console.print("[yellow]⚠[/yellow] Original droplet had Tailscale lockdown enabled.")
-                console.print(
-                    "[dim]Skipping Tailscale setup (--no-tailscale). "
-                    "Public SSH access available.[/dim]"
-                )
+                console.print("[dim]Skipping Tailscale setup (--no-tailscale).[/dim]")
                 console.print(
                     f"[dim]Enable Tailscale later with: "
                     f"[cyan]dropkit enable-tailscale {droplet_name}[/cyan][/dim]"
@@ -4265,10 +4266,7 @@ def wake(
                 tailscale_ip = setup_tailscale(ssh_hostname, username, config)
 
                 if not tailscale_ip:
-                    console.print(
-                        "[yellow]⚠[/yellow] Tailscale setup incomplete. "
-                        "Public SSH access remains available."
-                    )
+                    console.print("[yellow]⚠[/yellow] Tailscale setup incomplete.")
                     console.print(
                         f"[dim]Complete setup later with: "
                         f"[cyan]dropkit enable-tailscale {droplet_name}[/cyan][/dim]"
