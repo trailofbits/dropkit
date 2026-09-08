@@ -16,7 +16,7 @@ from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
-from dropkit.api import DigitalOceanAPI, DigitalOceanAPIError
+from dropkit.api import DigitalOceanAPI, DigitalOceanAPIError, DropletWaitTimeoutError
 from dropkit.cloudinit import render_cloud_init
 from dropkit.config import DEFAULT_IMAGE, DEFAULT_REGION, DEFAULT_SIZE, Config, DropkitConfig
 from dropkit.lock import requires_lock
@@ -4036,12 +4036,16 @@ def wake(
     droplet_name: str = typer.Argument(
         ..., autocompletion=complete_snapshot_name, help="Name of the hibernated droplet to restore"
     ),
+    timeout: int = typer.Option(
+        900, "--timeout", min=1, help="Seconds to wait for restoration (default: 15 minutes)"
+    ),
     no_tailscale: bool = typer.Option(False, "--no-tailscale", help="Skip Tailscale VPN re-setup"),
 ):
     """
     Wake a hibernated droplet (restore from snapshot).
 
     This will create a new droplet from the hibernated snapshot.
+    Run again after a timeout to resume setup of the same restored droplet.
     After successful restoration, you'll be prompted to delete the snapshot.
 
     If the original droplet had Tailscale lockdown enabled, this command will
@@ -4064,10 +4068,6 @@ def wake(
 
         # Check if a droplet with this name already exists
         existing_droplet, _ = find_user_droplet(api, droplet_name)
-        if existing_droplet:
-            console.print(f"[red]Error: A droplet named '{droplet_name}' already exists.[/red]")
-            console.print("[dim]Destroy or rename the existing droplet first.[/dim]")
-            raise typer.Exit(1)
 
         # Find the hibernated snapshot
         snapshot_name = get_snapshot_name(droplet_name)
@@ -4079,6 +4079,13 @@ def wake(
         if not snapshot:
             console.print(f"[red]Error: No hibernated snapshot found for '{droplet_name}'[/red]")
             console.print(f"[dim]Expected snapshot name: {snapshot_name}[/dim]")
+            if existing_droplet:
+                console.print(
+                    f"[dim]The droplet already exists. Check it with: dropkit info {droplet_name}[/dim]"
+                )
+                console.print(
+                    f"[dim]To configure SSH, run: dropkit config-ssh {droplet_name}[/dim]"
+                )
             raise typer.Exit(1)
 
         snapshot_id_str = snapshot.get("id")
@@ -4086,6 +4093,23 @@ def wake(
             console.print("[red]Error: Could not determine snapshot ID[/red]")
             raise typer.Exit(1)
         snapshot_id = int(snapshot_id_str)  # API returns string, convert to int
+
+        if existing_droplet:
+            # A matching name alone is insufficient: only resume a restore of this snapshot.
+            source_image_id = existing_droplet.get("image", {}).get("id")
+            if str(source_image_id) != str(snapshot_id):
+                console.print(
+                    f"[red]Error: A droplet named '{droplet_name}' already exists, "
+                    "but was not restored from this snapshot.[/red]"
+                )
+                console.print(f"[dim]Inspect it with: dropkit info {droplet_name}[/dim]")
+                raise typer.Exit(1)
+            status = existing_droplet.get("status")
+            if status not in {"new", "active"}:
+                console.print(f"[red]Cannot resume wake: droplet status is '{status}'.[/red]")
+                if status == "off":
+                    console.print(f"[dim]Power it on first: dropkit on {droplet_name}[/dim]")
+                raise typer.Exit(1)
 
         # Get snapshot details
         size_gb = snapshot.get("size_gigabytes", 0)
@@ -4120,33 +4144,60 @@ def wake(
         )
         console.print()
 
-        # Create droplet from snapshot
-        console.print(f"[dim]Creating droplet '{droplet_name}' from snapshot...[/dim]")
+        if existing_droplet:
+            droplet = existing_droplet
+            console.print(f"[dim]Resuming wake for existing droplet '{droplet_name}'...[/dim]")
+        else:
+            # Create droplet from snapshot
+            console.print(f"[dim]Creating droplet '{droplet_name}' from snapshot...[/dim]")
 
-        # Build tags for new droplet
-        tags_list = build_droplet_tags(username, list(config.defaults.extra_tags))
+            # Build tags for new droplet
+            tags_list = build_droplet_tags(username, list(config.defaults.extra_tags))
 
-        droplet = api.create_droplet_from_snapshot(
-            name=droplet_name,
-            region=original_region,
-            size=original_size,
-            snapshot_id=snapshot_id,
-            tags=tags_list,
-            ssh_keys=config.cloudinit.ssh_key_ids,
-        )
+            droplet = api.create_droplet_from_snapshot(
+                name=droplet_name,
+                region=original_region,
+                size=original_size,
+                snapshot_id=snapshot_id,
+                tags=tags_list,
+                ssh_keys=config.cloudinit.ssh_key_ids,
+            )
 
         droplet_id = droplet.get("id")
         if not droplet_id:
             console.print("[red]Error: Failed to get droplet ID from API response[/red]")
             raise typer.Exit(1)
 
-        console.print(f"[green]✓[/green] Droplet created (ID: [cyan]{droplet_id}[/cyan])")
+        console.print(f"[green]✓[/green] Droplet ID: [cyan]{droplet_id}[/cyan]")
 
         # Wait for droplet to become active
         console.print("[dim]Waiting for droplet to become active...[/dim]")
 
-        with console.status("[cyan]Waiting...[/cyan]"):
-            active_droplet = api.wait_for_droplet_active(droplet_id)
+        try:
+            with console.status("[cyan]Waiting...[/cyan]"):
+                active_droplet = api.wait_for_droplet_active(droplet_id, timeout=timeout)
+        except DropletWaitTimeoutError:
+            console.print(
+                f"[yellow]Stopped waiting after {timeout}s. DigitalOcean may still be "
+                f"restoring droplet '{droplet_name}' (ID: {droplet_id}).[/yellow]"
+            )
+            console.print("[dim]The droplet and snapshot have been kept.[/dim]")
+            console.print(f"[dim]Check status: dropkit info {droplet_name}[/dim]")
+            console.print(
+                f"[dim]Resume setup: dropkit wake {droplet_name} --timeout {timeout}"
+                f"{' --no-tailscale' if no_tailscale else ''}[/dim]"
+            )
+            raise typer.Exit(1)
+        except DigitalOceanAPIError:
+            console.print(
+                f"[yellow]Could not check readiness of droplet {droplet_id}. "
+                "The droplet and snapshot have been kept.[/yellow]"
+            )
+            console.print(
+                f"[dim]Check status with dropkit info {droplet_name}, "
+                "then rerun wake to resume setup.[/dim]"
+            )
+            raise
 
         # Get IP address
         networks = active_droplet.get("networks", {})
@@ -4162,7 +4213,9 @@ def wake(
             console.print(f"[green]✓[/green] Droplet is active (IP: [cyan]{ip_address}[/cyan])")
         else:
             console.print("[green]✓[/green] Droplet is active")
-            console.print("[yellow]⚠[/yellow] Could not determine IP address")
+            console.print("[red]Could not determine public IP address; snapshot kept.[/red]")
+            console.print(f"[dim]Retry setup: dropkit wake {droplet_name}[/dim]")
+            raise typer.Exit(1)
 
         # Add SSH config entry
         if ip_address and config.ssh.auto_update:
@@ -4178,7 +4231,12 @@ def wake(
                 )
                 console.print("[green]✓[/green] SSH config updated")
             except Exception as e:
-                console.print(f"[yellow]⚠[/yellow] Could not update SSH config: {e}")
+                console.print(f"[red]Could not update SSH config: {e}[/red]")
+                console.print(
+                    f"[dim]Snapshot kept. Fix the SSH configuration error, "
+                    f"then retry: dropkit wake {droplet_name}[/dim]"
+                )
+                raise typer.Exit(1)
 
         # Handle Tailscale re-setup if the original droplet had Tailscale lockdown
         if was_tailscale_locked and ip_address:

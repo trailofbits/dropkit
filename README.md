@@ -178,6 +178,9 @@ dropkit destroy my-droplet
 3. Snapshots are tagged with `owner:<username>` and `size:<size-slug>` for tracking
 4. After waking, you're prompted to delete the snapshot (default: yes)
 
+Wake waits up to 15 minutes by default. Use `dropkit wake my-droplet --timeout 1800`
+to wait up to 30 minutes.
+
 **Note:** Snapshots are billed at $0.06/GB/month, which is typically much cheaper than keeping a droplet running.
 
 ### Cloud-Init Customization

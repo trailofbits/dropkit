@@ -68,6 +68,10 @@ class DigitalOceanAPIError(Exception):
         super().__init__(message)
 
 
+class DropletWaitTimeoutError(DigitalOceanAPIError):
+    """The local wait expired; droplet creation may still be in progress."""
+
+
 PROTECTED_TAGS = {"owner", "firewall"}
 
 
@@ -405,12 +409,13 @@ class DigitalOceanAPI:
 
         Raises:
             ValueError: If droplet_id is not positive
-            DigitalOceanAPIError: If timeout is reached or droplet enters error state
+            DropletWaitTimeoutError: If the local wait expires
+            DigitalOceanAPIError: If the droplet enters an error state or an API request fails
         """
         import time
 
         self._validate_positive_int(droplet_id, "droplet_id")
-        start_time = time.time()
+        start_time = time.monotonic()
 
         while True:
             droplet = self.get_droplet(droplet_id)
@@ -423,9 +428,9 @@ class DigitalOceanAPI:
                     f"Droplet entered error state: {droplet.get('name', droplet_id)}"
                 )
 
-            elapsed = time.time() - start_time
-            if elapsed > timeout:
-                raise DigitalOceanAPIError(
+            elapsed = time.monotonic() - start_time
+            if elapsed >= timeout:
+                raise DropletWaitTimeoutError(
                     f"Timeout waiting for droplet to become active (waited {elapsed:.0f}s)"
                 )
 
