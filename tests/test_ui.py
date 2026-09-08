@@ -104,17 +104,10 @@ class TestParseFilterOperators:
 class TestParseFilterValues:
     """Tests for value and unit handling in parse_filter."""
 
-    def test_bare_memory_below_1024_is_gb(self):
-        """Test a bare memory number under 1024 is read as GB."""
-        assert parse_filter("mem>=16") == [("memory", ">=", 16384.0)]
-
-    def test_bare_memory_at_1024_is_mb(self):
-        """Test 1024 means 1 GB in MB, not 1024 GB."""
-        assert parse_filter("mem>=1024") == [("memory", ">=", 1024.0)]
-
-    def test_bare_memory_above_1024_is_mb(self):
-        """Test a large bare memory number is read as MB."""
-        assert parse_filter("mem>=16384") == [("memory", ">=", 16384.0)]
+    @pytest.mark.parametrize("value", [0.5, 16, 1023, 1024, 1025, 16384])
+    def test_bare_memory_is_always_gb(self, value):
+        assert parse_filter(f"mem>={value}") == [("memory", ">=", value * 1024)]
+        assert parse_filter(f"mem>={value}") == parse_filter(f"mem>={value}gb")
 
     def test_gb_and_mb_suffixes_agree(self):
         """Test the explicit suffixes both land on the same MB value."""

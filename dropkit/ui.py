@@ -84,7 +84,7 @@ class EditablePrompt(Prompt):
 
 
 def _parse_filter_value(field_key: str, raw: str) -> float:
-    """Parse a term's value into the API's unit; a bare mem number under 1024 means GB."""
+    """Parse a term's value into the API's unit; bare memory values always mean GB."""
     text = raw.replace(",", "").strip().lower()
     match = re.fullmatch(r"(\d+(?:\.\d+)?)\s*([a-z]*)", text)
     if not match:
@@ -95,7 +95,7 @@ def _parse_filter_value(field_key: str, raw: str) -> float:
     units = _FIELD_UNITS[field_key]
 
     if not unit:
-        if field_key == "memory" and number < 1024:
+        if field_key == "memory":
             return number * 1024
         return number
 
@@ -275,7 +275,7 @@ def _keyword_reference(fields: list[str]) -> str:
     return (
         f"[dim]filter fields:[/dim] {' '.join(fields)}\n"
         f"[dim]operators:[/dim] >= <= > < =\n"
-        f"[dim]units:[/dim] gb mb tb"
+        f"[dim]units:[/dim] gb mb tb; mem defaults to GB"
     )
 
 
@@ -309,6 +309,8 @@ def prompt_with_help(
         hint = "? to list, ?<filter> to narrow"
         console.print(f"[dim]  narrow with[/dim] ? {_FILTER_EXAMPLE}")
         console.print(f"[dim]  fields:[/dim] {'  '.join(fields)}   [dim]ops:[/dim] >=  <=  >  <  =")
+        if "mem" in fields:
+            console.print("[dim]  mem defaults to GB; explicit mb/gb/tb suffixes supported[/dim]")
     else:
         hint = "? to list"
 
