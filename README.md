@@ -239,8 +239,9 @@ prek run --stage manual                # Run via prek
 ```
 
 Requires a valid dropkit config (`~/.config/dropkit/config.yaml`) with a
-DigitalOcean API token. The test uses hardcoded defaults (nyc3, s-1vcpu-1gb,
-ubuntu-24-04-x64) so user config defaults don't affect test behavior.
+DigitalOcean API token. The test randomly selects hardcoded defaults for its
+region, size, and image (currently Ubuntu 24.04 or 26.04 LTS), so user config
+defaults don't affect test behavior.
 
 Optional environment variable overrides: `DROPLET_NAME`, `DROPLET_REGION`,
 `DROPLET_SIZE`, `DROPLET_IMAGE`, `E2E_SSH_TIMEOUT`.
