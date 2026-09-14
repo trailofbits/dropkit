@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 # Default slugs for droplet creation
 DEFAULT_REGION = "nyc3"
 DEFAULT_SIZE = "s-2vcpu-4gb"
-DEFAULT_IMAGE = "ubuntu-25-10-x64"
+DEFAULT_IMAGE = "ubuntu-26-04-x64"
 
 
 class DigitalOceanConfig(BaseModel):
