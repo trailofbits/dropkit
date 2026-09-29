@@ -43,12 +43,12 @@ Run the initialization wizard:
 dropkit init
 ```
 
-This will validate your DigitalOcean API token, detect SSH keys, register them with DigitalOcean, and let you choose defaults (type `?` for help to see available options).
+This will validate your DigitalOcean API token, detect SSH keys, register them with DigitalOcean, and let you choose defaults (type `?` to list the available options).
 
 ### 2. Create Your First Droplet
 
 ```bash
-# Interactive mode - prompts for name, region, size, image (type ? for help)
+# Interactive mode - prompts for name, region, size, image (type ? to list options)
 dropkit create
 
 # Or specify the name and use defaults
@@ -134,6 +134,17 @@ On failure, `--json` keeps `stdout` a clean JSON stream: the error is written to
 `null` when the value is unknown (e.g. `cost_monthly` is `null` for a size with no
 price, distinct from `0` for a genuinely free resource).
 
+## Listing and filtering options
+
+At any region, size, image, or project prompt, `?` lists the available choices.
+For sizes there are around 200, so the list can be narrowed by comparing `mem`,
+`cpu`, `disk`, `transfer` or `price` against `>=`, `<=`, `>`, `<` or `=`. Terms
+are ANDed.
+
+```
+Size (? to list, ?<filter> to narrow) [s-1vcpu-1gb]: cpu>=8 mem>=32 price<=300
+```
+
 ## Configuration
 
 Configuration files are stored in `~/.config/dropkit/`:
@@ -205,6 +216,9 @@ dropkit destroy my-droplet
 3. Snapshots are tagged with `owner:<username>` and `size:<size-slug>` for tracking
 4. After waking, you're prompted to delete the snapshot (default: yes)
 
+Wake waits up to 15 minutes by default. Use `dropkit wake my-droplet --timeout 1800`
+to wait up to 30 minutes.
+
 **Note:** Snapshots are billed at $0.06/GB/month, which is typically much cheaper than keeping a droplet running.
 
 ### Cloud-Init Customization
@@ -266,8 +280,9 @@ prek run --stage manual                # Run via prek
 ```
 
 Requires a valid dropkit config (`~/.config/dropkit/config.yaml`) with a
-DigitalOcean API token. The test uses hardcoded defaults (nyc3, s-1vcpu-1gb,
-ubuntu-24-04-x64) so user config defaults don't affect test behavior.
+DigitalOcean API token. The test randomly selects hardcoded defaults for its
+region, size, and image (currently Ubuntu 24.04 or 26.04 LTS), so user config
+defaults don't affect test behavior.
 
 Optional environment variable overrides: `DROPLET_NAME`, `DROPLET_REGION`,
 `DROPLET_SIZE`, `DROPLET_IMAGE`, `E2E_SSH_TIMEOUT`.

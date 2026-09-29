@@ -12,7 +12,7 @@
 #   DROPLET_NAME     — Name for the test droplet (default: e2e-<timestamp>)
 #   DROPLET_REGION   — Region slug (default: random from nyc3, sfo3, lon1)
 #   DROPLET_SIZE     — Size slug (default: random from s-1vcpu-1gb, s-2vcpu-4gb)
-#   DROPLET_IMAGE    — Image slug (default: random from ubuntu-24-04-x64, ubuntu-25-04-x64, ubuntu-25-10-x64)
+#   DROPLET_IMAGE    — Image slug (default: random from ubuntu-24-04-x64, ubuntu-26-04-x64)
 #   E2E_SSH_TIMEOUT  — SSH connect timeout in seconds (default: 10)
 
 set -euo pipefail
@@ -30,7 +30,7 @@ SSH_OPTS="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=${SSH_TIMEOUT} -
 # Randomized defaults — avoid hidden dependencies on specific slugs
 _REGIONS=(nyc3 sfo3 lon1)
 _SIZES=(s-1vcpu-1gb s-2vcpu-4gb)
-_IMAGES=(ubuntu-24-04-x64 ubuntu-25-04-x64 ubuntu-25-10-x64)
+_IMAGES=(ubuntu-24-04-x64 ubuntu-26-04-x64)
 
 _pick() {
   local -n arr=$1
