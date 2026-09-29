@@ -3,8 +3,10 @@
 import json
 from unittest.mock import MagicMock, patch
 
+import pytest
 from typer.testing import CliRunner
 
+from dropkit.api import DigitalOceanAPIError
 from dropkit.main import app, build_droplet_detail, build_droplet_record, build_ssh_key_record
 
 runner = CliRunner()
@@ -112,6 +114,45 @@ class TestInfoJsonErrors:
         error = json.loads(result.stderr)
         assert "missing" in error["error"]
 
+    @pytest.mark.parametrize("failure", ["username", "listing"])
+    @patch("dropkit.main.load_config_and_api")
+    def test_lookup_api_failure_emits_json_error(self, mock_load, failure):
+        api = MagicMock()
+        if failure == "username":
+            api.get_username.side_effect = DigitalOceanAPIError("account unavailable")
+        else:
+            api.get_username.return_value = "me"
+            api.list_droplets.side_effect = DigitalOceanAPIError("droplets unavailable")
+        mock_load.return_value = (MagicMock(), api)
+
+        result = runner.invoke(app, ["info", "srv", "--json"])
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert "unavailable" in json.loads(result.stderr)["error"]
+
+
+@pytest.mark.parametrize("command", [["list"], ["info", "srv"], ["list-ssh-keys"]])
+class TestJsonConfigErrors:
+    """The config loader must honor JSON mode before any command can emit output."""
+
+    @patch("dropkit.main.Config.exists", return_value=False)
+    def test_missing_config(self, mock_exists, command):
+        result = runner.invoke(app, [*command, "--json"])
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert "Config not found" in json.loads(result.stderr)["error"]
+
+    @patch("dropkit.main.Config.load", side_effect=ValueError("invalid token"))
+    @patch("dropkit.main.Config.exists", return_value=True)
+    def test_invalid_config(self, mock_exists, mock_load, command):
+        result = runner.invoke(app, [*command, "--json"])
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert "invalid token" in json.loads(result.stderr)["error"]
+
 
 class TestBuildSshKeyRecord:
     """Tests for build_ssh_key_record field extraction."""
@@ -189,3 +230,19 @@ class TestVersionJson:
         result = runner.invoke(app, ["version", "--json"])
         assert result.exit_code == 0
         assert "version" in json.loads(result.output)
+
+    @patch("dropkit.main.check_for_updates")
+    def test_update_notice_does_not_pollute_json(self, mock_check):
+        result = runner.invoke(app, ["version", "--json"])
+
+        assert result.exit_code == 0
+        assert json.loads(result.stdout)["version"]
+        assert result.stderr == ""
+        mock_check.assert_not_called()
+
+    @patch("dropkit.main.check_for_updates")
+    def test_table_mode_still_checks_for_updates(self, mock_check):
+        result = runner.invoke(app, ["version"])
+
+        assert result.exit_code == 0
+        mock_check.assert_called_once_with()

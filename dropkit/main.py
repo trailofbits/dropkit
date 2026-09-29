@@ -68,9 +68,12 @@ def emit_error(message: str, *, json_output: bool) -> None:
 
 
 @app.callback()
-def main_callback():
+def main_callback(ctx: typer.Context):
     """Run before any command - checks for updates once per day."""
-    check_for_updates()
+    # Commands with --json handle the update notice after parsing their own
+    # options, so it cannot contaminate a JSON response or error stream.
+    if ctx.invoked_subcommand not in {"list", "ls", "info", "list-ssh-keys", "version"}:
+        check_for_updates()
 
 
 # Helper functions
@@ -225,7 +228,7 @@ def complete_droplet_or_snapshot_name(incomplete: str) -> list[str]:
     return list(dict.fromkeys(droplet_names + snapshot_names))
 
 
-def load_config_and_api() -> tuple[Config, DigitalOceanAPI]:
+def load_config_and_api(*, json_output: bool = False) -> tuple[Config, DigitalOceanAPI]:
     """
     Load configuration and create API client.
 
@@ -236,17 +239,24 @@ def load_config_and_api() -> tuple[Config, DigitalOceanAPI]:
         typer.Exit: If config doesn't exist or fails to load
     """
     if not Config.exists():
-        console.print("[red]Error: Config not found. Run 'dropkit init' first.[/red]")
+        if json_output:
+            emit_error("Config not found. Run 'dropkit init' first.", json_output=True)
+        else:
+            console.print("[red]Error: Config not found. Run 'dropkit init' first.[/red]")
         raise typer.Exit(1)
 
     config_manager = Config()
     try:
         config_manager.load()
     except Exception as e:
-        console.print(f"[red]Error loading config: {e}[/red]")
-        console.print(
-            "[yellow]Config file may be invalid. Try running[/yellow] [cyan]dropkit init --force[/cyan]"
-        )
+        if json_output:
+            emit_error(f"loading config: {e}. Try running dropkit init --force", json_output=True)
+        else:
+            console.print(f"[red]Error loading config: {e}[/red]")
+            console.print(
+                "[yellow]Config file may be invalid. Try running[/yellow] "
+                "[cyan]dropkit init --force[/cyan]"
+            )
         raise typer.Exit(1)
 
     config = config_manager.config
@@ -1563,7 +1573,9 @@ def setup_tailscale(
     return tailscale_ip
 
 
-def find_user_droplet(api: DigitalOceanAPI, droplet_name: str) -> tuple[dict | None, str]:
+def find_user_droplet(
+    api: DigitalOceanAPI, droplet_name: str, *, json_output: bool = False
+) -> tuple[dict | None, str]:
     """
     Find a droplet by name, filtered by current user's tag.
 
@@ -1580,7 +1592,10 @@ def find_user_droplet(api: DigitalOceanAPI, droplet_name: str) -> tuple[dict | N
     try:
         username = api.get_username()
     except DigitalOceanAPIError as e:
-        console.print(f"[red]Error fetching username from DigitalOcean: {e}[/red]")
+        if json_output:
+            emit_error(f"fetching username from DigitalOcean: {e}", json_output=True)
+        else:
+            console.print(f"[red]Error fetching username from DigitalOcean: {e}[/red]")
         raise typer.Exit(1)
 
     # Get droplets tagged with this user
@@ -1588,7 +1603,10 @@ def find_user_droplet(api: DigitalOceanAPI, droplet_name: str) -> tuple[dict | N
         tag_name = get_user_tag(username)
         droplets = api.list_droplets(tag_name=tag_name)
     except DigitalOceanAPIError as e:
-        console.print(f"[red]Error listing droplets: {e}[/red]")
+        if json_output:
+            emit_error(f"listing droplets: {e}", json_output=True)
+        else:
+            console.print(f"[red]Error listing droplets: {e}[/red]")
         raise typer.Exit(1)
 
     # Find droplet by name
@@ -2273,9 +2291,11 @@ def list_droplets(
     json_output: bool = typer.Option(False, "--json", help=JSON_HELP),
 ):
     """List droplets and hibernated snapshots tagged with owner:<username>."""
+    if not json_output:
+        check_for_updates()
     try:
         # Load config and API
-        config_manager, api = load_config_and_api()
+        config_manager, api = load_config_and_api(json_output=json_output)
         config = config_manager.config
 
         # Get username from DigitalOcean for tag filtering
@@ -2624,15 +2644,17 @@ def info(
     json_output: bool = typer.Option(False, "--json", help=JSON_HELP),
 ):
     """Show detailed information about a droplet."""
+    if not json_output:
+        check_for_updates()
     try:
         # Load config and API
-        config_manager, api = load_config_and_api()
+        config_manager, api = load_config_and_api(json_output=json_output)
         config = config_manager.config
 
         # Find the droplet
         if not json_output:
             console.print(f"[dim]Looking for droplet: [cyan]{droplet_name}[/cyan][/dim]\n")
-        droplet, username = find_user_droplet(api, droplet_name)
+        droplet, username = find_user_droplet(api, droplet_name, json_output=json_output)
 
         if not droplet:
             tag = get_user_tag(username)
@@ -4557,9 +4579,11 @@ def list_ssh_keys_cmd(
 
     Use 'dropkit add-ssh-key' to add or import additional SSH keys.
     """
+    if not json_output:
+        check_for_updates()
     try:
         # Load config and API
-        _, api = load_config_and_api()
+        _, api = load_config_and_api(json_output=json_output)
 
         # Get username from DigitalOcean for filtering
         try:
@@ -4823,6 +4847,7 @@ def version(
         emit_json({"version": __version__})
         return
 
+    check_for_updates()
     console.print(f"dropkit version [cyan]{__version__}[/cyan]")
 
 
