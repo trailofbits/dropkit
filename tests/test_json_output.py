@@ -4,6 +4,7 @@ import json
 from unittest.mock import MagicMock, patch
 
 import pytest
+from rich.console import Console
 from typer.testing import CliRunner
 
 from dropkit.api import DigitalOceanAPIError
@@ -153,6 +154,16 @@ class TestJsonConfigErrors:
         assert result.stdout == ""
         assert "invalid token" in json.loads(result.stderr)["error"]
 
+    @patch("dropkit.main.Config.exists", return_value=False)
+    def test_error_has_no_terminal_styling(self, mock_exists, command):
+        terminal_console = Console(stderr=True, force_terminal=True, color_system="standard")
+        with patch("dropkit.main.err_console", terminal_console):
+            result = runner.invoke(app, [*command, "--json"])
+
+        assert result.exit_code == 1
+        assert "\x1b" not in result.stderr
+        assert "Config not found" in json.loads(result.stderr)["error"]
+
 
 class TestBuildSshKeyRecord:
     """Tests for build_ssh_key_record field extraction."""
@@ -230,6 +241,15 @@ class TestVersionJson:
         result = runner.invoke(app, ["version", "--json"])
         assert result.exit_code == 0
         assert "version" in json.loads(result.output)
+
+    def test_json_has_no_terminal_styling(self):
+        terminal_console = Console(force_terminal=True, color_system="standard")
+        with patch("dropkit.main.console", terminal_console):
+            result = runner.invoke(app, ["version", "--json"])
+
+        assert result.exit_code == 0
+        assert "\x1b" not in result.stdout
+        assert "version" in json.loads(result.stdout)
 
     @patch("dropkit.main.check_for_updates")
     def test_update_notice_does_not_pollute_json(self, mock_check):

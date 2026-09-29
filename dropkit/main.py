@@ -52,7 +52,7 @@ JSON_HELP = "Emit machine-readable JSON instead of formatted output (for scripti
 
 def emit_json(payload: Any) -> None:
     """Print a payload as formatted JSON on stdout for scripting and agents."""
-    console.print_json(data=payload)
+    sys.stdout.write(json.dumps(payload, indent=2) + "\n")
 
 
 def emit_error(message: str, *, json_output: bool) -> None:
@@ -62,7 +62,7 @@ def emit_error(message: str, *, json_output: bool) -> None:
     stream for consumers piping to ``jq``. Otherwise print a red message.
     """
     if json_output:
-        err_console.print_json(data={"error": message})
+        sys.stderr.write(json.dumps({"error": message}, indent=2) + "\n")
     else:
         err_console.print(f"[red]Error: {message}[/red]")
 
