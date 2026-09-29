@@ -4037,6 +4037,9 @@ def wake(
         ..., autocompletion=complete_snapshot_name, help="Name of the hibernated droplet to restore"
     ),
     no_tailscale: bool = typer.Option(False, "--no-tailscale", help="Skip Tailscale VPN re-setup"),
+    region: str | None = typer.Option(
+        None, "--region", "-r", help="Region slug (default: snapshot's original region)"
+    ),
 ):
     """
     Wake a hibernated droplet (restore from snapshot).
@@ -4102,8 +4105,17 @@ def wake(
             elif tag == "tailscale-lockdown":
                 was_tailscale_locked = True
 
-        if not original_region:
+        # Determine region: explicit flag > snapshot metadata > error
+        if region:
+            restore_region = region
+        elif original_region:
+            restore_region = original_region
+        else:
             console.print("[red]Error: Could not determine original region from snapshot[/red]")
+            console.print(
+                f"[dim]Specify a region explicitly: "
+                f"[cyan]dropkit wake {droplet_name} --region <slug>[/cyan][/dim]"
+            )
             raise typer.Exit(1)
 
         if not original_size:
@@ -4115,9 +4127,12 @@ def wake(
 
         # Display snapshot info
         console.print(f"Found hibernated snapshot: [cyan]{snapshot_name}[/cyan] ({size_gb} GB)")
+        original_display = original_region or "[yellow]unknown[/yellow]"
         console.print(
-            f"Original config: [cyan]{original_region}[/cyan], [cyan]{original_size}[/cyan]"
+            f"Original config: [cyan]{original_display}[/cyan], [cyan]{original_size}[/cyan]"
         )
+        if region and region != original_region:
+            console.print(f"Region override: [cyan]{region}[/cyan]")
         console.print()
 
         # Create droplet from snapshot
@@ -4128,7 +4143,7 @@ def wake(
 
         droplet = api.create_droplet_from_snapshot(
             name=droplet_name,
-            region=original_region,
+            region=restore_region,
             size=original_size,
             snapshot_id=snapshot_id,
             tags=tags_list,
