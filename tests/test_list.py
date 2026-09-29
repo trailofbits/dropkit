@@ -3,6 +3,7 @@
 import json
 from unittest.mock import MagicMock, patch
 
+import pytest
 from typer.testing import CliRunner
 
 from dropkit.main import app, build_droplet_record, build_hibernated_record
@@ -73,6 +74,17 @@ class TestBuildHibernatedRecord:
         assert record["region"] == "nyc3"
         assert record["cost_monthly"] > 0
 
+    @pytest.mark.parametrize(
+        ("size_gb", "expected_cost"),
+        [(None, None), (0, 0.0)],
+        ids=["unknown-size", "zero-size"],
+    )
+    def test_cost_distinguishes_unknown_from_zero_size(self, size_gb, expected_cost):
+        snapshot = {"name": "dropkit-web-prod", "size_gigabytes": size_gb}
+        record = build_hibernated_record(snapshot)
+        assert record["image_size_gb"] == size_gb
+        assert record["cost_monthly"] == expected_cost
+
 
 class TestListJsonOutput:
     """Tests for `dropkit list --json`."""
@@ -118,3 +130,70 @@ class TestListJsonOutput:
         payload = json.loads(result.output)
         assert payload["droplets"] == []
         assert payload["total_monthly_cost"] == 0
+
+    @pytest.mark.parametrize(
+        ("droplet_price", "snapshot_size", "expected_total"),
+        [(None, 25, None), (6, None, None), (6, 25, 7.5)],
+        ids=["unknown-droplet-price", "unknown-snapshot-size", "known-costs"],
+    )
+    @patch("dropkit.main.get_ssh_host_ip", return_value=None)
+    @patch("dropkit.main.host_exists", return_value=False)
+    @patch("dropkit.main.get_user_hibernated_snapshots")
+    @patch("dropkit.main.load_config_and_api")
+    def test_total_requires_known_costs(
+        self,
+        mock_load,
+        mock_snaps,
+        mock_exists,
+        mock_ip,
+        droplet_price,
+        snapshot_size,
+        expected_total,
+    ):
+        droplet = make_droplet()
+        droplet["size"] = {"price_monthly": droplet_price}
+        api = MagicMock()
+        api.get_username.return_value = "me"
+        api.list_droplets.return_value = [droplet]
+        mock_snaps.return_value = [
+            {"name": "dropkit-web-prod", "size_gigabytes": snapshot_size, "regions": ["nyc3"]}
+        ]
+        cm = MagicMock()
+        cm.config.ssh.config_path = "~/.ssh/config"
+        mock_load.return_value = (cm, api)
+
+        result = runner.invoke(app, ["list", "--json"])
+
+        assert result.exit_code == 0
+        payload = json.loads(result.stdout)
+        assert payload["total_monthly_cost"] == expected_total
+        assert payload["droplets"][0]["cost_monthly"] == droplet_price
+        assert payload["hibernated"][0]["image_size_gb"] == snapshot_size
+
+
+class TestListTableOutput:
+    """Adding JSON must not change the existing human-readable list."""
+
+    @pytest.mark.parametrize("cost", [True, False], ids=["with-cost", "without-cost"])
+    @patch("dropkit.main.get_ssh_host_ip", return_value=None)
+    @patch("dropkit.main.host_exists", return_value=False)
+    @patch("dropkit.main.get_user_hibernated_snapshots", return_value=[])
+    @patch("dropkit.main.load_config_and_api")
+    @patch("dropkit.main.check_for_updates")
+    def test_default_list_keeps_table_and_cost_option(
+        self, mock_updates, mock_load, mock_snaps, mock_exists, mock_ip, cost
+    ):
+        api = MagicMock()
+        api.get_username.return_value = "me"
+        api.list_droplets.return_value = [make_droplet("web")]
+        cm = MagicMock()
+        cm.config.ssh.config_path = "~/.ssh/config"
+        mock_load.return_value = (cm, api)
+
+        result = runner.invoke(app, ["list", *([] if cost else ["--no-cost"])])
+
+        assert result.exit_code == 0
+        assert "Droplets:" in result.stdout
+        assert "web" in result.stdout
+        assert ("$6.00/mo" in result.stdout) is cost
+        mock_updates.assert_called_once_with()

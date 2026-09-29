@@ -129,11 +129,13 @@ dropkit list-ssh-keys --json | jq -r '.ssh_keys[].fingerprint'
   `name`/`id`/`fingerprint`.
 - **`version --json`** — the dropkit `version` string.
 
-On failure, `--json` keeps `stdout` a clean JSON stream: the error is written to
-`stderr` as `{"error": "..."}` and the command exits non-zero. Numeric fields are
-`null` when the value is unknown (e.g. `cost_monthly` is `null` for a size with no
-price, distinct from `0` for a genuinely free resource). Update notices are
-suppressed in JSON mode.
+For command execution errors, `--json` keeps `stdout` a clean JSON stream: the
+error is written to `stderr` as `{"error": "..."}` and the command exits non-zero.
+Argument parsing errors still use Typer's normal usage output. Numeric fields
+are `null` when the value is unknown (e.g. `cost_monthly` is `null` for a size
+with no price, distinct from `0` for a genuinely free resource). The list's
+`total_monthly_cost` is `null` if any resource cost is unknown. Update notices
+are suppressed in JSON mode.
 
 ## Listing and filtering options
 

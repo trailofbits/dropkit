@@ -57,22 +57,19 @@ class TestBuildDropletDetail:
 class TestBuildDropletRecord:
     """Tests for build_droplet_record contract guarantees."""
 
+    @pytest.mark.parametrize(
+        ("size", "expected_cost"),
+        [({}, None), ({"price_monthly": 0}, 0.0)],
+        ids=["unknown-price", "free"],
+    )
     @patch("dropkit.main.is_tailscale_ip", return_value=False)
     @patch("dropkit.main.get_ssh_host_ip", return_value=None)
     @patch("dropkit.main.host_exists", return_value=False)
-    def test_cost_monthly_none_when_price_absent(self, mock_exists, mock_ip, mock_ts):
-        record = build_droplet_record({"name": "srv", "size": {}}, "~/.ssh/config")
-        assert record["cost_monthly"] is None
-
-    @patch("dropkit.main.is_tailscale_ip", return_value=False)
-    @patch("dropkit.main.get_ssh_host_ip", return_value=None)
-    @patch("dropkit.main.host_exists", return_value=False)
-    def test_cost_monthly_zero_is_preserved(self, mock_exists, mock_ip, mock_ts):
-        # A genuine $0 resource must stay 0.0, distinct from an unknown price.
-        record = build_droplet_record(
-            {"name": "srv", "size": {"price_monthly": 0}}, "~/.ssh/config"
-        )
-        assert record["cost_monthly"] == 0.0
+    def test_cost_monthly_distinguishes_unknown_from_free(
+        self, mock_exists, mock_ip, mock_ts, size, expected_cost
+    ):
+        record = build_droplet_record({"name": "srv", "size": size}, "~/.ssh/config")
+        assert record["cost_monthly"] == expected_cost
 
     @patch("dropkit.main.is_tailscale_ip", return_value=False)
     @patch("dropkit.main.get_ssh_host_ip", return_value=None)
@@ -137,32 +134,24 @@ class TestInfoJsonErrors:
 class TestJsonConfigErrors:
     """The config loader must honor JSON mode before any command can emit output."""
 
-    @patch("dropkit.main.Config.exists", return_value=False)
-    def test_missing_config(self, mock_exists, command):
-        result = runner.invoke(app, [*command, "--json"])
-
-        assert result.exit_code == 1
-        assert result.stdout == ""
-        assert "Config not found" in json.loads(result.stderr)["error"]
-
-    @patch("dropkit.main.Config.load", side_effect=ValueError("invalid token"))
-    @patch("dropkit.main.Config.exists", return_value=True)
-    def test_invalid_config(self, mock_exists, mock_load, command):
-        result = runner.invoke(app, [*command, "--json"])
-
-        assert result.exit_code == 1
-        assert result.stdout == ""
-        assert "invalid token" in json.loads(result.stderr)["error"]
-
-    @patch("dropkit.main.Config.exists", return_value=False)
-    def test_error_has_no_terminal_styling(self, mock_exists, command):
-        terminal_console = Console(stderr=True, force_terminal=True, color_system="standard")
-        with patch("dropkit.main.err_console", terminal_console):
+    @pytest.mark.parametrize(
+        ("config_exists", "expected_error"),
+        [(False, "Config not found"), (True, "invalid token")],
+        ids=["missing-config", "invalid-config"],
+    )
+    def test_error_is_json_without_terminal_styling(self, command, config_exists, expected_error):
+        terminal_console = Console(force_terminal=True, color_system="standard")
+        with (
+            patch("dropkit.main.console", terminal_console),
+            patch("dropkit.main.Config.exists", return_value=config_exists),
+            patch("dropkit.main.Config.load", side_effect=ValueError("invalid token")),
+        ):
             result = runner.invoke(app, [*command, "--json"])
 
         assert result.exit_code == 1
+        assert result.stdout == ""
         assert "\x1b" not in result.stderr
-        assert "Config not found" in json.loads(result.stderr)["error"]
+        assert expected_error in json.loads(result.stderr)["error"]
 
 
 class TestBuildSshKeyRecord:
