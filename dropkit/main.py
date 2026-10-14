@@ -644,7 +644,9 @@ def wait_for_cloud_init(ssh_hostname: str, verbose: bool = False) -> tuple[bool,
     Raises:
         None - errors are handled internally and reported to console
     """
-    console.print("[dim]Waiting for cloud-init to complete...[/dim]")
+    console.print(
+        f"[dim]Waiting for cloud-init to complete... (started {time.strftime('%H:%M:%S')})[/dim]"
+    )
     console.print(
         "[dim]This may take several minutes for packages to install and setup to finish[/dim]"
     )
