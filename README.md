@@ -25,7 +25,10 @@ A command-line tool for managing DigitalOcean droplets with automated setup, SSH
 ## Installation
 
 ```bash
-# HTTPS or SSH depending on your GitHub setup
+# Install from PyPI after the first release is published
+uv tool install dropkit
+
+# Or install directly from GitHub (HTTPS or SSH)
 uv tool install git+https://github.com/trailofbits/dropkit.git
 uv tool install git+ssh://git@github.com/trailofbits/dropkit.git
 
