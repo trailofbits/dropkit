@@ -25,13 +25,25 @@ A command-line tool for managing DigitalOcean droplets with automated setup, SSH
 ## Installation
 
 ```bash
-# HTTPS or SSH depending on your GitHub setup
+# Install from PyPI after the first release is published
+uv tool install dropkit
+
+# Or install directly from GitHub (HTTPS or SSH)
 uv tool install git+https://github.com/trailofbits/dropkit.git
 uv tool install git+ssh://git@github.com/trailofbits/dropkit.git
 
 # Upgrade
 uv tool upgrade dropkit
 ```
+
+## Publishing
+
+Publishing a GitHub release builds the package and uploads it to PyPI through
+Trusted Publishing. Before the first release, [configure a pending PyPI trusted
+publisher](https://docs.pypi.org/trusted-publishers/creating-a-project-through-oidc/)
+for project `dropkit` with owner `trailofbits`, repository `dropkit`, workflow
+`release.yml`, and environment `pypi`. Set the release version in `pyproject.toml`
+before publishing the matching tag.
 
 ## Quick Start
 
