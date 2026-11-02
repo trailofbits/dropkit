@@ -36,15 +36,6 @@ uv tool install git+ssh://git@github.com/trailofbits/dropkit.git
 uv tool upgrade dropkit
 ```
 
-## Publishing
-
-Publishing a GitHub release builds the package and uploads it to PyPI through
-Trusted Publishing. Before the first release, [configure a pending PyPI trusted
-publisher](https://docs.pypi.org/trusted-publishers/creating-a-project-through-oidc/)
-for project `dropkit` with owner `trailofbits`, repository `dropkit`, workflow
-`release.yml`, and environment `pypi`. Set the release version in `pyproject.toml`
-before publishing the matching tag.
-
 ## Quick Start
 
 ### 1. Initialize Configuration
