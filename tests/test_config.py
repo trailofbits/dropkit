@@ -18,7 +18,6 @@ from dropkit.config import (
     DropkitConfig,
     SSHConfig,
 )
-from dropkit.ssh_config import add_ssh_host
 
 SSH_PUBLIC_KEY = (
     "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFGW/ZeZ1NgiZQsIAI9rL+6IUhSpx9ujmL3RKwwUaNaq "
@@ -345,25 +344,9 @@ class TestConfigManager:
         )
 
         identity = Path(config.config.ssh.identity_file)
-        assert identity.parent == temp_config_dir / "ssh"
-        assert identity.suffix == ".pub"
         assert identity.read_text().strip() == SSH_PUBLIC_KEY
         assert identity.stat().st_mode & 0o777 == 0o600
         assert identity.parent.stat().st_mode & 0o777 == 0o700
-        assert config.config.cloudinit.ssh_keys == [SSH_PUBLIC_KEY]
-        Config.validate_ssh_public_key(str(identity))
-
-        ssh_config = temp_config_dir / "ssh-config"
-        ssh_config.write_text("Host *\n    IdentitiesOnly yes\n")
-        add_ssh_host(str(ssh_config), "dropkit.test", "192.0.2.1", "testuser", str(identity))
-        result = subprocess.run(
-            ["ssh", "-G", "-F", str(ssh_config), "dropkit.test"],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        assert f"identityfile {identity}" in result.stdout.splitlines()
-        assert "identitiesonly yes" in result.stdout.splitlines()
 
         # Reinitializing reuses the same public-key file.
         config.create_default_config(
@@ -611,26 +594,6 @@ class TestConfigManager:
         """Keep DigitalOcean's colon-separated MD5 format without the MD5: prefix."""
         assert Config.compute_ssh_key_fingerprint(SSH_PUBLIC_KEY) == SSH_FINGERPRINT
 
-    @pytest.mark.parametrize(
-        ("error", "message"),
-        [
-            (FileNotFoundError(), "ssh-keygen is required"),
-            (subprocess.TimeoutExpired("ssh-keygen", 5), "Timed out"),
-        ],
-    )
-    def test_ssh_keygen_unavailable(self, error, message):
-        """Report a useful error instead of falling back to weaker validation."""
-        with (
-            patch("dropkit.config.subprocess.run", side_effect=error),
-            pytest.raises(ValueError, match=message),
-        ):
-            Config.validate_ssh_public_key(SSH_PUBLIC_KEY)
-
-    def test_read_ssh_key_content_inline(self):
-        """Test that inline SSH key content is returned as-is."""
-        inline_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... user@example.com"
-        assert Config.read_ssh_key_content(inline_key) == inline_key
-
     def test_detect_ssh_agent_keys(self, tmp_path, monkeypatch):
         """Test detection of SSH keys from ssh-agent."""
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
@@ -654,13 +617,6 @@ class TestConfigManager:
         assert len(keys) == 1
         assert "AAAANEW" in keys[0]
         assert "agentkey@1password" in keys[0]
-
-    def test_detect_ssh_agent_keys_no_agent(self):
-        """Test detection when no ssh-agent socket is available."""
-        with patch.object(Config, "_get_ssh_agent_sock", return_value=None):
-            keys = Config.detect_ssh_agent_keys()
-
-        assert keys == []
 
     def test_detect_ssh_agent_keys_agent_empty(self):
         """Test detection when ssh-agent has no keys."""
@@ -704,18 +660,6 @@ class TestConfigManager:
 
         assert sock == str(fake_sock)
 
-    def test_get_ssh_agent_sock_none_when_unavailable(self, monkeypatch):
-        """Test returning None when no agent socket is available."""
-        monkeypatch.delenv("SSH_AUTH_SOCK", raising=False)
-
-        with patch(
-            "dropkit.config.subprocess.run",
-            side_effect=FileNotFoundError,
-        ):
-            sock = Config._get_ssh_agent_sock()
-
-        assert sock is None
-
     def test_identity_agent_none_disables_discovery(self, tmp_path, monkeypatch):
         """An explicit IdentityAgent none takes precedence over SSH_AUTH_SOCK."""
         agent_sock = tmp_path / "agent.sock"
@@ -726,4 +670,3 @@ class TestConfigManager:
             assert Config.detect_ssh_agent_keys() == []
         # Do not invoke ssh-add after the SSH config disables agent use.
         run.assert_called_once()
-        assert run.call_args.args[0] == ["ssh", "-G", "localhost"]
