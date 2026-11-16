@@ -1,6 +1,8 @@
 """Comprehensive tests for configuration management with Pydantic validation."""
 
+import subprocess
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from pydantic import ValidationError
@@ -16,6 +18,13 @@ from dropkit.config import (
     DropkitConfig,
     SSHConfig,
 )
+from dropkit.ssh_config import add_ssh_host
+
+SSH_PUBLIC_KEY = (
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFGW/ZeZ1NgiZQsIAI9rL+6IUhSpx9ujmL3RKwwUaNaq "
+    "user@example.com"
+)
+SSH_FINGERPRINT = "ef:9f:b5:c6:6e:f9:3d:9c:6b:7b:02:b9:bb:5a:4a:2e"
 
 
 @pytest.fixture
@@ -327,6 +336,60 @@ class TestConfigManager:
             )
         assert "SSH key" in str(exc_info.value)
 
+    def test_create_config_with_agent_key(self, temp_config_dir, monkeypatch):
+        """Persist a usable public IdentityFile for a key held only by an agent."""
+        monkeypatch.setattr(Config, "CONFIG_DIR", temp_config_dir)
+        config = Config()
+        config.create_default_config(
+            token="test_token", username="testuser", ssh_keys=[SSH_PUBLIC_KEY], ssh_key_ids=[12345]
+        )
+
+        identity = Path(config.config.ssh.identity_file)
+        assert identity.parent == temp_config_dir / "ssh"
+        assert identity.suffix == ".pub"
+        assert identity.read_text().strip() == SSH_PUBLIC_KEY
+        assert identity.stat().st_mode & 0o777 == 0o600
+        assert identity.parent.stat().st_mode & 0o777 == 0o700
+        assert config.config.cloudinit.ssh_keys == [SSH_PUBLIC_KEY]
+        Config.validate_ssh_public_key(str(identity))
+
+        ssh_config = temp_config_dir / "ssh-config"
+        ssh_config.write_text("Host *\n    IdentitiesOnly yes\n")
+        add_ssh_host(str(ssh_config), "dropkit.test", "192.0.2.1", "testuser", str(identity))
+        result = subprocess.run(
+            ["ssh", "-G", "-F", str(ssh_config), "dropkit.test"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert f"identityfile {identity}" in result.stdout.splitlines()
+        assert "identitiesonly yes" in result.stdout.splitlines()
+
+        # Reinitializing reuses the same public-key file.
+        config.create_default_config(
+            token="test_token", username="testuser", ssh_keys=[SSH_PUBLIC_KEY], ssh_key_ids=[12345]
+        )
+        assert config.config.ssh.identity_file == str(identity)
+        assert list(identity.parent.iterdir()) == [identity]
+
+    @pytest.mark.parametrize("has_private_key", [True, False])
+    def test_create_config_with_file_key(self, tmp_path, has_private_key):
+        """Use a private key when present, or its public file to select an agent key."""
+        public_key = tmp_path / "id_ed25519.pub"
+        public_key.write_text(SSH_PUBLIC_KEY + "\n")
+        private_key = public_key.with_suffix("")
+        if has_private_key:
+            private_key.touch()
+        config = Config()
+        config.create_default_config(
+            token="test_token",
+            username="testuser",
+            ssh_keys=[SSH_PUBLIC_KEY, str(public_key)],
+            ssh_key_ids=[12345],
+        )
+        expected = private_key if has_private_key else public_key
+        assert config.config.ssh.identity_file == str(expected)
+
     def test_save_without_config_raises_error(self):
         """Test that saving without config raises error."""
         config = Config()
@@ -456,30 +519,11 @@ class TestConfigManager:
         with pytest.raises(FileNotFoundError):
             Config.read_ssh_key_content("/nonexistent/key.pub")
 
-    def test_validate_ssh_public_key_valid_ed25519(self, tmp_path):
-        """Test validation of valid ED25519 public key."""
+    def test_validate_ssh_public_key_file(self, tmp_path):
+        """Test validation of a public key file."""
         key_file = tmp_path / "id_ed25519.pub"
-        key_file.write_text("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... user@example.com\n")
+        key_file.write_text(SSH_PUBLIC_KEY + "\n")
 
-        # Should not raise any exception
-        Config.validate_ssh_public_key(str(key_file))
-
-    def test_validate_ssh_public_key_valid_rsa(self, tmp_path):
-        """Test validation of valid RSA public key."""
-        key_file = tmp_path / "id_rsa.pub"
-        key_file.write_text("ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAAB... user@example.com\n")
-
-        # Should not raise any exception
-        Config.validate_ssh_public_key(str(key_file))
-
-    def test_validate_ssh_public_key_valid_ecdsa(self, tmp_path):
-        """Test validation of valid ECDSA public key."""
-        key_file = tmp_path / "id_ecdsa.pub"
-        key_file.write_text(
-            "ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNT... user@example.com\n"
-        )
-
-        # Should not raise any exception
         Config.validate_ssh_public_key(str(key_file))
 
     def test_validate_ssh_public_key_private_key_fails(self, tmp_path):
@@ -524,3 +568,162 @@ class TestConfigManager:
         with pytest.raises(ValueError) as exc_info:
             Config.validate_ssh_public_key(str(key_file))
         assert "does not appear to be a valid SSH public key" in str(exc_info.value)
+
+    def test_validate_ssh_public_key_inline_content(self):
+        """Test that inline SSH key content passes validation."""
+        Config.validate_ssh_public_key(SSH_PUBLIC_KEY)
+
+    @pytest.mark.parametrize(
+        "invalid_key",
+        [
+            "ssh-ed25519 AAAA user@example.com",
+            SSH_PUBLIC_KEY.replace("ssh-ed25519", "invalid-key-type", 1),
+            SSH_PUBLIC_KEY.replace("ssh-ed25519", "ssh-rsa", 1),
+            SSH_PUBLIC_KEY + "\n" + SSH_PUBLIC_KEY,
+        ],
+        ids=["truncated-payload", "invalid-type", "mismatched-type", "multiple-keys"],
+    )
+    def test_malformed_keys_fail_validation_and_fingerprinting(self, invalid_key, tmp_path):
+        """Both inline and file inputs must be valid single SSH public keys."""
+        key_file = tmp_path / "invalid.pub"
+        key_file.write_text(invalid_key + "\n")
+        for entry in (invalid_key, str(key_file)):
+            with pytest.raises(ValueError, match="does not appear to be a valid SSH public key"):
+                Config.validate_ssh_public_key(entry)
+        with pytest.raises(ValueError, match="does not appear to be a valid SSH public key"):
+            Config.compute_ssh_key_fingerprint(invalid_key)
+
+    def test_real_private_key_rejected_even_with_pub_extension(self, tmp_path):
+        """ssh-keygen accepts private keys, so reject them before invoking it."""
+        private_key = tmp_path / "private-key"
+        subprocess.run(
+            ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(private_key)],
+            check=True,
+        )
+        content = private_key.read_text()
+        disguised_key = tmp_path / "disguised.pub"
+        disguised_key.write_text(content)
+        for entry in (content, str(disguised_key)):
+            with pytest.raises(ValueError, match="does not appear to be a valid SSH public key"):
+                Config.validate_ssh_public_key(entry)
+
+    def test_compute_ssh_key_fingerprint(self):
+        """Keep DigitalOcean's colon-separated MD5 format without the MD5: prefix."""
+        assert Config.compute_ssh_key_fingerprint(SSH_PUBLIC_KEY) == SSH_FINGERPRINT
+
+    @pytest.mark.parametrize(
+        ("error", "message"),
+        [
+            (FileNotFoundError(), "ssh-keygen is required"),
+            (subprocess.TimeoutExpired("ssh-keygen", 5), "Timed out"),
+        ],
+    )
+    def test_ssh_keygen_unavailable(self, error, message):
+        """Report a useful error instead of falling back to weaker validation."""
+        with (
+            patch("dropkit.config.subprocess.run", side_effect=error),
+            pytest.raises(ValueError, match=message),
+        ):
+            Config.validate_ssh_public_key(SSH_PUBLIC_KEY)
+
+    def test_read_ssh_key_content_inline(self):
+        """Test that inline SSH key content is returned as-is."""
+        inline_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... user@example.com"
+        assert Config.read_ssh_key_content(inline_key) == inline_key
+
+    def test_detect_ssh_agent_keys(self, tmp_path, monkeypatch):
+        """Test detection of SSH keys from ssh-agent."""
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+        # Create .ssh dir with one on-disk key
+        ssh_dir = tmp_path / ".ssh"
+        ssh_dir.mkdir()
+        (ssh_dir / "id_ed25519.pub").write_text("ssh-ed25519 AAAADISK diskkey@host\n")
+
+        # Mock ssh-add -L returning two keys (one matching disk, one new)
+        agent_output = "ssh-ed25519 AAAADISK diskkey@host\nssh-ed25519 AAAANEW agentkey@1password\n"
+        result = subprocess.CompletedProcess([], 0, stdout=agent_output)
+
+        with (
+            patch.object(Config, "_get_ssh_agent_sock", return_value="/tmp/agent.sock"),
+            patch("dropkit.config.subprocess.run", return_value=result),
+        ):
+            keys = Config.detect_ssh_agent_keys()
+
+        # Only the new agent key (not the one already on disk) should be returned
+        assert len(keys) == 1
+        assert "AAAANEW" in keys[0]
+        assert "agentkey@1password" in keys[0]
+
+    def test_detect_ssh_agent_keys_no_agent(self):
+        """Test detection when no ssh-agent socket is available."""
+        with patch.object(Config, "_get_ssh_agent_sock", return_value=None):
+            keys = Config.detect_ssh_agent_keys()
+
+        assert keys == []
+
+    def test_detect_ssh_agent_keys_agent_empty(self):
+        """Test detection when ssh-agent has no keys."""
+        result = subprocess.CompletedProcess([], 1, stdout="The agent has no identities.\n")
+
+        with (
+            patch.object(Config, "_get_ssh_agent_sock", return_value="/tmp/agent.sock"),
+            patch("dropkit.config.subprocess.run", return_value=result),
+        ):
+            keys = Config.detect_ssh_agent_keys()
+
+        assert keys == []
+
+    def test_get_ssh_agent_sock_from_ssh_config(self, tmp_path):
+        """Test resolving agent socket from ssh -G localhost."""
+        agent_sock = tmp_path / "1password-agent.sock"
+        agent_sock.touch()
+        result = subprocess.CompletedProcess(
+            [],
+            0,
+            stdout=f"identityagent {agent_sock}\nuser testuser\n",
+        )
+
+        with patch("dropkit.config.subprocess.run", return_value=result):
+            sock = Config._get_ssh_agent_sock()
+
+        assert sock == str(agent_sock)
+
+    def test_get_ssh_agent_sock_falls_back_to_env(self, tmp_path, monkeypatch):
+        """Test falling back to SSH_AUTH_SOCK when ssh -G has no IdentityAgent."""
+        ssh_g_output = "user testuser\nhostname localhost\n"
+        result = subprocess.CompletedProcess([], 0, stdout=ssh_g_output)
+
+        # Create a fake socket file
+        fake_sock = tmp_path / "agent.sock"
+        fake_sock.touch()
+        monkeypatch.setenv("SSH_AUTH_SOCK", str(fake_sock))
+
+        with patch("dropkit.config.subprocess.run", return_value=result):
+            sock = Config._get_ssh_agent_sock()
+
+        assert sock == str(fake_sock)
+
+    def test_get_ssh_agent_sock_none_when_unavailable(self, monkeypatch):
+        """Test returning None when no agent socket is available."""
+        monkeypatch.delenv("SSH_AUTH_SOCK", raising=False)
+
+        with patch(
+            "dropkit.config.subprocess.run",
+            side_effect=FileNotFoundError,
+        ):
+            sock = Config._get_ssh_agent_sock()
+
+        assert sock is None
+
+    def test_identity_agent_none_disables_discovery(self, tmp_path, monkeypatch):
+        """An explicit IdentityAgent none takes precedence over SSH_AUTH_SOCK."""
+        agent_sock = tmp_path / "agent.sock"
+        agent_sock.touch()
+        monkeypatch.setenv("SSH_AUTH_SOCK", str(agent_sock))
+        result = subprocess.CompletedProcess([], 0, stdout="identityagent none\n")
+        with patch("dropkit.config.subprocess.run", return_value=result) as run:
+            assert Config.detect_ssh_agent_keys() == []
+        # Do not invoke ssh-add after the SSH config disables agent use.
+        run.assert_called_once()
+        assert run.call_args.args[0] == ["ssh", "-G", "localhost"]
