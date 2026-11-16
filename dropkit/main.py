@@ -525,21 +525,40 @@ def register_ssh_keys_with_do(api: DigitalOceanAPI) -> tuple[list[str], list[int
     # Auto-detect SSH keys
     console.print("\n[bold]SSH Keys[/bold]")
     detected_keys = Config.detect_ssh_keys()
+    agent_keys = Config.detect_ssh_agent_keys()
 
-    if not detected_keys:
-        console.print("[yellow]⚠[/yellow] No SSH keys detected in ~/.ssh/")
-        console.print("[dim]Please add SSH keys to ~/.ssh/ and run init again[/dim]")
+    if not detected_keys and not agent_keys:
+        console.print("[yellow]⚠[/yellow] No SSH keys detected in ~/.ssh/ or ssh-agent")
+        console.print(
+            "[dim]Please add SSH keys to ~/.ssh/ or configure an SSH agent and run init again[/dim]"
+        )
         raise typer.Exit(1)
+
+    # Combine file-based and agent keys for display
+    all_keys = detected_keys + agent_keys
 
     # Show detected keys
     console.print("[green]✓[/green] Detected SSH public keys:")
-    for i, key in enumerate(detected_keys, 1):
-        console.print(f"  {i}. [cyan]{key}[/cyan]")
+    agent_key_set = set(agent_keys)
+    for i, key in enumerate(all_keys, 1):
+        if key in agent_key_set:
+            # Show key type and comment (or truncated key) for agent keys
+            parts = key.split()
+            key_type = parts[0]
+            comment = parts[2] if len(parts) >= 3 else parts[1][:16] + "..."
+            console.print(f"  {i}. [cyan]{key_type} {comment}[/cyan] [dim](ssh-agent)[/dim]")
+        else:
+            console.print(f"  {i}. [cyan]{key}[/cyan]")
 
     # Let user select which keys to use
-    if len(detected_keys) == 1:
-        ssh_keys = detected_keys
-        console.print(f"\n[dim]Using SSH key: {ssh_keys[0]}[/dim]")
+    if len(all_keys) == 1:
+        ssh_keys = all_keys
+        if ssh_keys[0] in agent_key_set:
+            parts = ssh_keys[0].split()
+            label = parts[2] if len(parts) >= 3 else parts[0]
+            console.print(f"\n[dim]Using SSH key: {label} (ssh-agent)[/dim]")
+        else:
+            console.print(f"\n[dim]Using SSH key: {ssh_keys[0]}[/dim]")
     else:
         selection = Prompt.ask(
             "\n[cyan]Select SSH keys to use (comma-separated numbers, or 'all')[/cyan]",
@@ -547,11 +566,11 @@ def register_ssh_keys_with_do(api: DigitalOceanAPI) -> tuple[list[str], list[int
         )
 
         if selection.lower() == "all":
-            ssh_keys = detected_keys
+            ssh_keys = all_keys
         else:
             try:
                 indices = [int(s.strip()) - 1 for s in selection.split(",") if s.strip()]
-                ssh_keys = [detected_keys[i] for i in indices if 0 <= i < len(detected_keys)]
+                ssh_keys = [all_keys[i] for i in indices if 0 <= i < len(all_keys)]
                 if not ssh_keys:
                     console.print("[red]Error: No valid keys selected[/red]")
                     raise typer.Exit(1)
@@ -589,16 +608,21 @@ def register_ssh_keys_with_do(api: DigitalOceanAPI) -> tuple[list[str], list[int
     ssh_key_ids = []
 
     try:
-        for key_path in ssh_keys:
-            key_content = Config.read_ssh_key_content(key_path)
+        for key_entry in ssh_keys:
+            key_content = Config.read_ssh_key_content(key_entry)
+
+            # Human-friendly label for display
+            if key_entry in agent_key_set:
+                parts = key_entry.split()
+                key_label = parts[2] if len(parts) >= 3 else f"{parts[0]} (agent)"
+            else:
+                key_label = Path(key_entry).name
 
             # Compute fingerprint
             try:
                 fingerprint = Config.compute_ssh_key_fingerprint(key_content)
             except ValueError as e:
-                console.print(
-                    f"[red]Error computing fingerprint for {Path(key_path).name}: {e}[/red]"
-                )
+                console.print(f"[red]Error computing fingerprint for {key_label}: {e}[/red]")
                 raise typer.Exit(1)
 
             # Check if key already exists by fingerprint
@@ -606,13 +630,13 @@ def register_ssh_keys_with_do(api: DigitalOceanAPI) -> tuple[list[str], list[int
 
             if existing_key:
                 ssh_key_ids.append(existing_key["id"])
-                console.print(f"[green]✓[/green] Key already registered: {Path(key_path).name}")
+                console.print(f"[green]✓[/green] Key already registered: {key_label}")
             else:
                 # Register new key with format: dropkit-{username}-{fingerprint_prefix}
                 # Use first 8 characters of fingerprint (without colons)
                 fingerprint_prefix = fingerprint.replace(":", "")[:8]
                 key_name = f"dropkit-{username}-{fingerprint_prefix}"
-                console.print(f"[dim]Registering new key: {Path(key_path).name}...[/dim]")
+                console.print(f"[dim]Registering new key: {key_label}...[/dim]")
                 new_key = api.add_ssh_key(key_name, key_content)
                 ssh_key_ids.append(new_key["id"])
                 console.print(f"[green]✓[/green] Registered new key: {key_name}")

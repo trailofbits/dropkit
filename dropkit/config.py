@@ -1,12 +1,11 @@
 """Configuration management for dropkit."""
 
-import base64
-import hashlib
 import os
+import subprocess
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 
 import yaml
-from cryptography.hazmat.primitives import serialization
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # Default slugs for droplet creation
@@ -204,65 +203,162 @@ class Config:
         return found_keys
 
     @staticmethod
-    def validate_ssh_public_key(key_path: str) -> None:
+    def _get_ssh_agent_sock() -> str | None:
+        """Resolve the SSH agent socket path.
+
+        Checks in order:
+        1. ``IdentityAgent`` from SSH config (via ``ssh -G localhost``) — this is
+           how 1Password configures its agent.
+        2. ``SSH_AUTH_SOCK`` environment variable.
         """
-        Validate that a file is a valid SSH public key.
-
-        Args:
-            key_path: Path to the SSH key file
-
-        Raises:
-            ValueError: If the file is not a valid SSH public key
-            FileNotFoundError: If the file doesn't exist
-        """
-        path = Path(key_path).expanduser()
-
-        if not path.exists():
-            raise FileNotFoundError(f"SSH key not found: {key_path}")
-
-        # Check if filename ends with .pub
-        if not path.name.endswith(".pub"):
-            raise ValueError(
-                f"SSH key file must be a public key (*.pub): {key_path}\n"
-                f"Private keys should NEVER be uploaded to DigitalOcean."
-            )
-
-        # Read and validate content
+        # 1. Resolve IdentityAgent from SSH config
         try:
-            with open(path) as f:
-                content = f.read().strip()
-        except Exception as e:
-            raise ValueError(f"Cannot read SSH key file: {e}")
-
-        if not content:
-            raise ValueError(f"SSH key file is empty: {key_path}")
-
-        # Valid public key prefixes
-        valid_prefixes = (
-            "ssh-rsa ",
-            "ssh-ed25519 ",
-            "ecdsa-sha2-nistp256 ",
-            "ecdsa-sha2-nistp384 ",
-            "ecdsa-sha2-nistp521 ",
-            "sk-ssh-ed25519@openssh.com ",
-            "sk-ecdsa-sha2-nistp256@openssh.com ",
-        )
-
-        if not content.startswith(valid_prefixes):
-            raise ValueError(
-                f"File does not appear to be a valid SSH public key: {key_path}\n"
-                f"Public keys should start with: {', '.join(p.strip() for p in valid_prefixes)}"
+            result = subprocess.run(
+                ["ssh", "-G", "localhost"],
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=5,
             )
+            for line in result.stdout.splitlines():
+                key, _, value = line.partition(" ")
+                if key == "identityagent" and value == "none":
+                    return None
+                if key == "identityagent" and value:
+                    sock = Path(value).expanduser()
+                    if sock.exists():
+                        return str(sock)
+        except (
+            FileNotFoundError,
+            subprocess.TimeoutExpired,
+            subprocess.CalledProcessError,
+            OSError,
+        ):
+            pass
+
+        # 2. Fall back to SSH_AUTH_SOCK env var
+        ssh_sock = os.environ.get("SSH_AUTH_SOCK")
+        if ssh_sock and Path(ssh_sock).exists():
+            return ssh_sock
+
+        return None
 
     @staticmethod
-    def read_ssh_key_content(key_path: str) -> str:
-        """Read SSH public key content."""
-        path = Path(key_path).expanduser()
-        if not path.exists():
-            raise FileNotFoundError(f"SSH key not found: {key_path}")
+    def detect_ssh_agent_keys() -> list[str]:
+        """Detect SSH public keys available from the ssh-agent (e.g. 1Password).
 
-        with open(path) as f:
-            return f.read().strip()
+        Resolves the agent socket (``IdentityAgent`` in SSH config or
+        ``SSH_AUTH_SOCK``), runs ``ssh-add -L``, and returns public key strings
+        that are not already present as ``.pub`` files in ``~/.ssh/``.
+
+        Returns:
+            List of inline public key strings from the agent (deduplicated
+            against on-disk keys).
+        """
+        agent_sock = Config._get_ssh_agent_sock()
+        if not agent_sock:
+            return []
+
+        env = {**os.environ, "SSH_AUTH_SOCK": agent_sock}
+        try:
+            result = subprocess.run(
+                ["ssh-add", "-L"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                env=env,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return []
+
+        if result.returncode != 0 or not result.stdout.strip():
+            return []
+
+        # Collect on-disk key contents for deduplication
+        disk_key_contents: set[str] = set()
+        ssh_dir = Path.home() / ".ssh"
+        if ssh_dir.exists():
+            for pub_file in ssh_dir.glob("*.pub"):
+                try:
+                    content = pub_file.read_text().strip()
+                    # Normalize: compare only key-type + key-data (ignore comment)
+                    parts = content.split()
+                    if len(parts) >= 2:
+                        disk_key_contents.add(f"{parts[0]} {parts[1]}")
+                except OSError:
+                    continue
+
+        agent_keys: list[str] = []
+        for raw_line in result.stdout.strip().splitlines():
+            line = raw_line.strip()
+            parts = line.split()
+            if len(parts) >= 2 and f"{parts[0]} {parts[1]}" not in disk_key_contents:
+                agent_keys.append(line)
+
+        return agent_keys
+
+    @staticmethod
+    def validate_ssh_public_key(key_path_or_content: str) -> None:
+        """
+        Validate that a value is a valid SSH public key.
+
+        Accepts either a file path to a ``.pub`` file or inline public key
+        content (e.g. from the ssh-agent).
+
+        Args:
+            key_path_or_content: Path to SSH key file, or inline key content
+
+        Raises:
+            ValueError: If the key is not a valid SSH public key
+            FileNotFoundError: If a file path is given and the file doesn't exist
+        """
+        path = Path(key_path_or_content).expanduser()
+
+        try:
+            is_file = path.is_file()
+        except OSError:
+            is_file = False
+
+        if is_file:
+            if not path.name.endswith(".pub"):
+                raise ValueError(
+                    f"SSH key file must be a public key (*.pub): {key_path_or_content}\n"
+                    f"Private keys should NEVER be uploaded to DigitalOcean."
+                )
+
+            try:
+                with open(path) as f:
+                    content = f.read().strip()
+            except OSError as e:
+                raise ValueError(f"Cannot read SSH key file: {e}")
+        else:
+            if len(key_path_or_content.split()) < 2:
+                raise FileNotFoundError(f"SSH key not found: {key_path_or_content}")
+            content = key_path_or_content.strip()
+
+        if not content:
+            raise ValueError(f"SSH key file is empty: {key_path_or_content}")
+
+        Config.compute_ssh_key_fingerprint(content)
+
+    @staticmethod
+    def read_ssh_key_content(key_path_or_content: str) -> str:
+        """Read SSH public key content.
+
+        Accepts a file path or inline key content (from ssh-agent).
+        """
+        path = Path(key_path_or_content).expanduser()
+        try:
+            if path.is_file():
+                with open(path) as f:
+                    return f.read().strip()
+        except OSError:
+            pass
+
+        if len(key_path_or_content.split()) >= 2:
+            return key_path_or_content
+
+        raise FileNotFoundError(f"SSH key not found: {key_path_or_content}")
 
     @staticmethod
     def compute_ssh_key_fingerprint(public_key: str) -> str:
@@ -278,24 +374,36 @@ class Config:
         Raises:
             ValueError: If key format is invalid
         """
+        content = public_key.strip()
+        # ssh-keygen also accepts private keys and files containing multiple keys.
+        # Only pass it a single public-key line intended for upload/cloud-init.
+        if len(content.splitlines()) != 1 or content.startswith("-----BEGIN "):
+            raise ValueError("Value does not appear to be a valid SSH public key")
+
         try:
-            # Validate and load SSH public key using cryptography library
-            serialization.load_ssh_public_key(public_key.encode())
+            with NamedTemporaryFile(mode="w", suffix=".pub") as key_file:
+                key_file.write(content + "\n")
+                key_file.flush()
+                result = subprocess.run(
+                    ["ssh-keygen", "-l", "-E", "md5", "-f", key_file.name],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                    timeout=5,
+                )
+        except FileNotFoundError:
+            raise ValueError("OpenSSH ssh-keygen is required to validate SSH public keys")
+        except subprocess.TimeoutExpired:
+            raise ValueError("Timed out validating SSH public key with ssh-keygen")
+        except subprocess.CalledProcessError:
+            raise ValueError("Value does not appear to be a valid SSH public key")
+        except OSError as e:
+            raise ValueError(f"Cannot validate SSH public key: {e}")
 
-            # Parse SSH public key format: "ssh-rsa AAAAB3... comment"
-            # Extract the base64 key material (second field)
-            parts = public_key.strip().split()
-            if len(parts) < 2:
-                raise ValueError("Invalid SSH public key format")
-
-            # Decode the base64 key material and compute MD5
-            key_data = base64.b64decode(parts[1])
-            fingerprint = hashlib.md5(key_data).hexdigest()
-
-            # Format as colon-separated hex pairs
-            return ":".join(fingerprint[i : i + 2] for i in range(0, len(fingerprint), 2))
-        except Exception as e:
-            raise ValueError(f"Failed to compute SSH key fingerprint: {e}")
+        fields = result.stdout.split()
+        if len(fields) < 2 or not fields[1].startswith("MD5:"):
+            raise ValueError("ssh-keygen did not return an MD5 fingerprint")
+        return fields[1].removeprefix("MD5:")
 
     def create_default_config(
         self,
@@ -327,6 +435,34 @@ class Config:
         if extra_tags is None:
             extra_tags = []
 
+        identity_file = None
+        for key in ssh_keys:
+            try:
+                public_key_path = Path(key).expanduser()
+                if public_key_path.is_file():
+                    private_key_path = public_key_path.with_suffix("")
+                    identity_file = str(
+                        private_key_path if private_key_path.is_file() else public_key_path
+                    )
+                    break
+            except OSError:
+                pass
+            if len(key.split()) < 2:
+                identity_file = str(Path(key).expanduser()).removesuffix(".pub")
+                break
+
+        if identity_file is None:
+            # OpenSSH can select a key in an agent using a local public IdentityFile.
+            public_key = ssh_keys[0].strip()
+            fingerprint = self.compute_ssh_key_fingerprint(public_key).replace(":", "")
+            self.ensure_config_dir()
+            key_dir = self.CONFIG_DIR / "ssh"
+            key_dir.mkdir(mode=0o700, exist_ok=True)
+            public_key_path = key_dir / f"agent-{fingerprint}.pub"
+            public_key_path.write_text(public_key + "\n")
+            public_key_path.chmod(0o600)
+            identity_file = str(public_key_path)
+
         # Create validated Pydantic model
         self._config = DropkitConfig(
             digitalocean=DigitalOceanConfig(
@@ -347,6 +483,6 @@ class Config:
             ssh=SSHConfig(
                 config_path=str(Path.home() / ".ssh" / "config"),
                 auto_update=True,
-                identity_file=ssh_keys[0].replace(".pub", "") if ssh_keys else "~/.ssh/id_ed25519",
+                identity_file=identity_file,
             ),
         )
