@@ -38,10 +38,10 @@ uv tool upgrade dropkit
 
 ### Nix
 
-With Nix flakes enabled, install dropkit directly from GitHub:
+With Nix flakes enabled, run dropkit directly from GitHub.
 
 ```bash
-nix profile install github:trailofbits/dropkit
+nix run github:trailofbits/dropkit -- --help
 ```
 
 Run `nix develop` from a checkout to enter the development shell. GitHub
