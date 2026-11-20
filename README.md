@@ -36,6 +36,19 @@ uv tool install git+ssh://git@github.com/trailofbits/dropkit.git
 uv tool upgrade dropkit
 ```
 
+### Nix
+
+With Nix flakes enabled, install dropkit directly from GitHub:
+
+```bash
+nix profile install github:trailofbits/dropkit
+```
+
+Run `nix develop` from a checkout to enter the development shell. GitHub
+Actions checks the flake outputs, builds and runs the CLI, and enters the
+development shell on Linux and macOS. Dependabot checks `flake.lock` for
+input updates weekly.
+
 ## Quick Start
 
 ### 1. Initialize Configuration

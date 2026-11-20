@@ -43,3 +43,28 @@ jobs:
 
       - name: Run tests
         run: uv run pytest
+
+  nix:
+    name: Nix (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086  # v31.11.5
+
+      - name: Check flake outputs
+        run: nix flake check --all-systems --no-update-lock-file
+
+      - name: Build and smoke-test the package
+        run: nix run --no-update-lock-file . -- --help
+
+      - name: Smoke-test the development shell
+        run: nix develop --no-update-lock-file --command uv --version
