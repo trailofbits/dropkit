@@ -229,7 +229,12 @@ to wait up to 30 minutes.
 
 ### Cloud-Init Customization
 
-Edit `~/.config/dropkit/cloud-init.yaml` to customize user setup, package installation, firewall rules, and shell configuration. The template uses Jinja2 syntax with variables `{{ username }}` and `{{ ssh_keys }}`.
+Edit `~/.config/dropkit/cloud-init.yaml` to customize user setup, package
+installation, firewall rules, and shell configuration. The template uses Jinja2
+syntax with variables `{{ username }}`, `{{ ssh_keys }}`, `{{ full_name }}`, and
+`{{ email }}`. When passing account fields to `runcmd`, use command lists and
+the Jinja2 `tojson` filter so punctuation is preserved as a YAML string without
+passing it through a shell.
 
 ## Troubleshooting
 

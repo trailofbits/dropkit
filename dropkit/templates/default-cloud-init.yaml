@@ -102,8 +102,8 @@ runcmd:
   - chown {{ username }}:{{ username }} /home/{{ username }}
 
   # Configure git globally for the user
-  - su {{ username }} -c "git config --global user.name '{{ full_name }}'"
-  - su {{ username }} -c "git config --global user.email '{{ email }}'"
+  - [runuser, -u, {{ username | tojson }}, --, git, config, --global, user.name, {{ full_name | tojson }}]
+  - [runuser, -u, {{ username | tojson }}, --, git, config, --global, user.email, {{ email | tojson }}]
 
   # Set Zsh as default shell and ensure ownership
   - chsh -s /usr/bin/zsh {{ username }}

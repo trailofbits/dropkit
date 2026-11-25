@@ -49,9 +49,67 @@ def test_default_template_renders():
     )
     assert "testuser" in rendered
     assert "ssh-ed25519 AAAAC3... test@host" in rendered
-    assert "git config --global user.name 'Test User'" in rendered
-    assert "git config --global user.email 'test@example.com'" in rendered
+    commands = yaml.safe_load(rendered)["runcmd"]
+    assert [
+        "runuser",
+        "-u",
+        "testuser",
+        "--",
+        "git",
+        "config",
+        "--global",
+        "user.name",
+        "Test User",
+    ] in commands
+    assert [
+        "runuser",
+        "-u",
+        "testuser",
+        "--",
+        "git",
+        "config",
+        "--global",
+        "user.email",
+        "test@example.com",
+    ] in commands
     assert "tailscale" in rendered
+
+
+@pytest.mark.parametrize(
+    ("full_name", "email"),
+    [
+        ("Pat Jones", "pat.jones@example.com"),
+        ("Pat O'Neil", "pat.o'neil+qa@example.com"),
+        ('Ada "A." Lovelace', "ada+test@example.com"),
+        ("Chris: A #1", "chris.a@example.com"),
+    ],
+)
+def test_git_account_fields_are_literal_argv(full_name, email, cloud_config_schema):
+    """Account punctuation survives YAML parsing without entering a shell command."""
+    template = Template(_load_default_template())
+    rendered = template.render(
+        username="testuser",
+        full_name=full_name,
+        email=email,
+        ssh_keys=["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 test@host"],
+        tailscale_enabled=True,
+    )
+    doc = yaml.safe_load(rendered)
+    errors = list(Draft4Validator(cloud_config_schema).iter_errors(doc))
+    assert not errors, [error.message for error in errors]
+
+    git_commands = [
+        command for command in doc["runcmd"] if isinstance(command, list) and "git" in command
+    ]
+    assert git_commands == [
+        ["runuser", "-u", "testuser", "--", "git", "config", "--global", "user.name", full_name],
+        ["runuser", "-u", "testuser", "--", "git", "config", "--global", "user.email", email],
+    ]
+    assert all(
+        full_name not in command and email not in command
+        for command in doc["runcmd"]
+        if isinstance(command, str)
+    )
 
 
 def test_default_template_renders_without_tailscale():
