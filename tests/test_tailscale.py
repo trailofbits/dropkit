@@ -18,6 +18,9 @@ from dropkit.main import (
     tailscale_logout,
     verify_tailscale_ssh,
 )
+from dropkit.ssh_host_keys import SSHConnection
+
+TEST_SSH = SSHConnection("dropkit.test", "/nonexistent/ssh_config", 123)
 
 
 class TestIsTailscaleIP:
@@ -184,7 +187,7 @@ class TestRunTailscaleUp:
             returncode=0,
             stdout=b"To authenticate, visit:\n\n\thttps://login.tailscale.com/a/abc123\n",
         )
-        url = run_tailscale_up("dropkit.test")
+        url = run_tailscale_up(TEST_SSH)
         assert url == "https://login.tailscale.com/a/abc123"
 
     @patch("dropkit.main.subprocess.run")
@@ -194,7 +197,7 @@ class TestRunTailscaleUp:
             returncode=0,
             stdout=b"Visit: https://login.tailscale.com/a/abc123.\n",
         )
-        url = run_tailscale_up("dropkit.test")
+        url = run_tailscale_up(TEST_SSH)
         assert url == "https://login.tailscale.com/a/abc123"
 
     @patch("dropkit.main.subprocess.run")
@@ -204,7 +207,7 @@ class TestRunTailscaleUp:
             returncode=0,
             stdout=b"Some other output without URL",
         )
-        url = run_tailscale_up("dropkit.test")
+        url = run_tailscale_up(TEST_SSH)
         assert url is None
 
     @patch("dropkit.main.subprocess.run")
@@ -214,7 +217,7 @@ class TestRunTailscaleUp:
             returncode=0,
             stdout=b"Visit https://example.com/login for more info",
         )
-        url = run_tailscale_up("dropkit.test")
+        url = run_tailscale_up(TEST_SSH)
         assert url is None
 
     @patch("dropkit.main.subprocess.run")
@@ -223,7 +226,7 @@ class TestRunTailscaleUp:
         import subprocess
 
         mock_run.side_effect = subprocess.TimeoutExpired("ssh", 30)
-        url = run_tailscale_up("dropkit.test")
+        url = run_tailscale_up(TEST_SSH)
         assert url is None
 
 
@@ -234,7 +237,7 @@ class TestLockDownToTailscale:
     def test_all_commands_succeed(self, mock_run):
         """Test when all UFW commands succeed."""
         mock_run.return_value = MagicMock(returncode=0, stderr=b"")
-        result = lock_down_to_tailscale("dropkit.test")
+        result = lock_down_to_tailscale(TEST_SSH)
         assert result is True
         # Should have called 5 commands
         assert mock_run.call_count == 5
@@ -243,7 +246,7 @@ class TestLockDownToTailscale:
     def test_first_command_fails(self, mock_run):
         """Test when first UFW command fails."""
         mock_run.return_value = MagicMock(returncode=1, stderr=b"ufw error")
-        result = lock_down_to_tailscale("dropkit.test")
+        result = lock_down_to_tailscale(TEST_SSH)
         assert result is False
         # Should stop after first failure
         assert mock_run.call_count == 1
@@ -257,7 +260,7 @@ class TestLockDownToTailscale:
             MagicMock(returncode=0, stderr=b""),
             MagicMock(returncode=1, stderr=b"deny error"),
         ]
-        result = lock_down_to_tailscale("dropkit.test")
+        result = lock_down_to_tailscale(TEST_SSH)
         assert result is False
         assert mock_run.call_count == 3
 
@@ -267,7 +270,7 @@ class TestLockDownToTailscale:
         import subprocess
 
         mock_run.side_effect = subprocess.TimeoutExpired("ssh", 30)
-        result = lock_down_to_tailscale("dropkit.test")
+        result = lock_down_to_tailscale(TEST_SSH)
         assert result is False
 
 
@@ -278,14 +281,14 @@ class TestVerifyTailscaleSsh:
     def test_ssh_success(self, mock_run):
         """Test when SSH via Tailscale works."""
         mock_run.return_value = MagicMock(returncode=0)
-        result = verify_tailscale_ssh("100.64.1.1", "testuser", "~/.ssh/id_ed25519")
+        result = verify_tailscale_ssh(TEST_SSH)
         assert result is True
 
     @patch("dropkit.main.subprocess.run")
     def test_ssh_failure(self, mock_run):
         """Test when SSH via Tailscale fails."""
         mock_run.return_value = MagicMock(returncode=255)
-        result = verify_tailscale_ssh("100.64.1.1", "testuser", "~/.ssh/id_ed25519")
+        result = verify_tailscale_ssh(TEST_SSH)
         assert result is False
 
     @patch("dropkit.main.subprocess.run")
@@ -294,7 +297,7 @@ class TestVerifyTailscaleSsh:
         import subprocess
 
         mock_run.side_effect = subprocess.TimeoutExpired("ssh", 15)
-        result = verify_tailscale_ssh("100.64.1.1", "testuser", "~/.ssh/id_ed25519")
+        result = verify_tailscale_ssh(TEST_SSH)
         assert result is False
 
 
@@ -333,13 +336,13 @@ class TestCheckTailscaleInstalled:
     def test_tailscale_installed(self, mock_run):
         """Test when Tailscale is installed."""
         mock_run.return_value = MagicMock(returncode=0)
-        assert check_tailscale_installed("dropkit.test") is True
+        assert check_tailscale_installed(TEST_SSH) is True
 
     @patch("dropkit.main.subprocess.run")
     def test_tailscale_not_installed(self, mock_run):
         """Test when Tailscale is not installed."""
         mock_run.return_value = MagicMock(returncode=1)
-        assert check_tailscale_installed("dropkit.test") is False
+        assert check_tailscale_installed(TEST_SSH) is False
 
     @patch("dropkit.main.subprocess.run")
     def test_ssh_timeout(self, mock_run):
@@ -347,7 +350,7 @@ class TestCheckTailscaleInstalled:
         import subprocess
 
         mock_run.side_effect = subprocess.TimeoutExpired("ssh", 15)
-        assert check_tailscale_installed("dropkit.test") is False
+        assert check_tailscale_installed(TEST_SSH) is False
 
     @patch("dropkit.main.subprocess.run")
     def test_ssh_connection_failed(self, mock_run):
@@ -355,7 +358,7 @@ class TestCheckTailscaleInstalled:
         import subprocess
 
         mock_run.side_effect = subprocess.SubprocessError("Connection refused")
-        assert check_tailscale_installed("dropkit.test") is False
+        assert check_tailscale_installed(TEST_SSH) is False
 
 
 class TestInstallTailscaleOnDroplet:
@@ -368,7 +371,7 @@ class TestInstallTailscaleOnDroplet:
             returncode=0,
             stdout=b"Installation complete!",
         )
-        assert install_tailscale_on_droplet("dropkit.test") is True
+        assert install_tailscale_on_droplet(TEST_SSH) is True
 
     @patch("dropkit.main.subprocess.run")
     def test_install_failure(self, mock_run):
@@ -377,7 +380,7 @@ class TestInstallTailscaleOnDroplet:
             returncode=1,
             stdout=b"Error: curl failed",
         )
-        assert install_tailscale_on_droplet("dropkit.test") is False
+        assert install_tailscale_on_droplet(TEST_SSH) is False
 
     @patch("dropkit.main.subprocess.run")
     def test_install_timeout(self, mock_run):
@@ -385,7 +388,7 @@ class TestInstallTailscaleOnDroplet:
         import subprocess
 
         mock_run.side_effect = subprocess.TimeoutExpired("ssh", 120)
-        assert install_tailscale_on_droplet("dropkit.test") is False
+        assert install_tailscale_on_droplet(TEST_SSH) is False
 
     @patch("dropkit.main.subprocess.run")
     def test_ssh_connection_failed(self, mock_run):
@@ -393,7 +396,7 @@ class TestInstallTailscaleOnDroplet:
         import subprocess
 
         mock_run.side_effect = subprocess.SubprocessError("Connection refused")
-        assert install_tailscale_on_droplet("dropkit.test") is False
+        assert install_tailscale_on_droplet(TEST_SSH) is False
 
 
 def create_mock_config(lock_down_firewall: bool = True, auth_timeout: int = 300) -> MagicMock:
@@ -410,6 +413,22 @@ def create_mock_config(lock_down_firewall: bool = True, auth_timeout: int = 300)
 
 class TestSetupTailscale:
     """Tests for setup_tailscale function."""
+
+    @patch("dropkit.main.lock_down_to_tailscale")
+    @patch("dropkit.main.add_ssh_host")
+    @patch("dropkit.main.verify_tailscale_ssh", return_value=False)
+    @patch("dropkit.main.check_local_tailscale", return_value=True)
+    @patch("dropkit.main.wait_for_tailscale_ip", return_value="100.64.1.1")
+    @patch("dropkit.main.run_tailscale_up", return_value=None)
+    def test_failed_verification_keeps_current_route(
+        self, mock_up, mock_ip, mock_local, mock_verify, mock_add, mock_lockdown
+    ):
+        assert setup_tailscale(TEST_SSH, "testuser", create_mock_config()) is None
+        new_route = mock_verify.call_args.args[0]
+        assert new_route.address == "100.64.1.1"
+        assert new_route.known_hosts == TEST_SSH.known_hosts
+        mock_add.assert_not_called()
+        mock_lockdown.assert_not_called()
 
     @patch("dropkit.main.verify_tailscale_ssh")
     @patch("dropkit.main.lock_down_to_tailscale")
@@ -436,13 +455,11 @@ class TestSetupTailscale:
         mock_verify.return_value = True
 
         config = create_mock_config()
-        result = setup_tailscale("dropkit.test", "testuser", config)
+        result = setup_tailscale(TEST_SSH, "testuser", config)
 
         assert result == "100.64.1.1"
         # Should have called wait_for_tailscale_ip with short timeout
-        mock_wait_ip.assert_called_once_with(
-            "dropkit.test", timeout=10, poll_interval=2, verbose=False
-        )
+        mock_wait_ip.assert_called_once_with(TEST_SSH, timeout=10, poll_interval=2, verbose=False)
         mock_add_ssh.assert_called_once()
         mock_lockdown.assert_called_once()
 
@@ -460,7 +477,7 @@ class TestSetupTailscale:
         mock_wait_ip.return_value = None
 
         config = create_mock_config()
-        result = setup_tailscale("dropkit.test", "testuser", config)
+        result = setup_tailscale(TEST_SSH, "testuser", config)
 
         assert result is None
 
@@ -489,11 +506,11 @@ class TestSetupTailscale:
         mock_verify.return_value = True
 
         config = create_mock_config()
-        result = setup_tailscale("dropkit.test", "testuser", config)
+        result = setup_tailscale(TEST_SSH, "testuser", config)
 
         assert result == "100.64.1.1"
         # Should have called wait_for_tailscale_ip with full auth_timeout
-        mock_wait_ip.assert_called_once_with("dropkit.test", timeout=300, verbose=False)
+        mock_wait_ip.assert_called_once_with(TEST_SSH, timeout=300, verbose=False)
 
     @patch("dropkit.main.wait_for_tailscale_ip")
     @patch("dropkit.main.run_tailscale_up")
@@ -509,7 +526,7 @@ class TestSetupTailscale:
         mock_wait_ip.return_value = None
 
         config = create_mock_config()
-        result = setup_tailscale("dropkit.test", "testuser", config)
+        result = setup_tailscale(TEST_SSH, "testuser", config)
 
         assert result is None
 
@@ -529,7 +546,7 @@ class TestSetupTailscale:
         mock_wait_ip.return_value = "100.64.1.1"
 
         config = create_mock_config(lock_down_firewall=False)
-        result = setup_tailscale("dropkit.test", "testuser", config)
+        result = setup_tailscale(TEST_SSH, "testuser", config)
 
         assert result == "100.64.1.1"
         mock_check_local.assert_not_called()  # Lockdown logic not entered
@@ -542,7 +559,7 @@ class TestTailscaleLogout:
     def test_logout_success(self, mock_run):
         """Test successful Tailscale logout."""
         mock_run.return_value = MagicMock(returncode=0, stderr=b"")
-        result = tailscale_logout("dropkit.test")
+        result = tailscale_logout(TEST_SSH)
         assert result is True
         # Verify correct SSH command was called
         mock_run.assert_called_once()
@@ -555,7 +572,7 @@ class TestTailscaleLogout:
     def test_logout_command_fails(self, mock_run):
         """Test when tailscale logout command fails."""
         mock_run.return_value = MagicMock(returncode=1, stderr=b"logout failed")
-        result = tailscale_logout("dropkit.test")
+        result = tailscale_logout(TEST_SSH)
         assert result is False
 
     @patch("dropkit.main.subprocess.run")
@@ -564,7 +581,7 @@ class TestTailscaleLogout:
         import subprocess
 
         mock_run.side_effect = subprocess.SubprocessError("Connection refused")
-        result = tailscale_logout("dropkit.test")
+        result = tailscale_logout(TEST_SSH)
         assert result is False
 
     @patch("dropkit.main.subprocess.run")
@@ -573,5 +590,5 @@ class TestTailscaleLogout:
         import subprocess
 
         mock_run.side_effect = subprocess.TimeoutExpired("ssh", 30)
-        result = tailscale_logout("dropkit.test")
+        result = tailscale_logout(TEST_SSH)
         assert result is False

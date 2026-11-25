@@ -2,11 +2,19 @@
 
 from unittest.mock import MagicMock, patch
 
+import pytest
 from typer.testing import CliRunner
 
 from dropkit.main import app
+from dropkit.ssh_host_keys import known_hosts_path
 
 runner = CliRunner()
+
+
+@pytest.fixture(autouse=True)
+def isolate_rename(tmp_path, monkeypatch):
+    monkeypatch.setattr("dropkit.lock.LOCK_FILE", tmp_path / "dropkit.lock")
+    monkeypatch.setattr("dropkit.main.get_ssh_host_ip", lambda *_: None)
 
 
 def create_mock_droplet(
@@ -83,6 +91,9 @@ class TestRenameCommand:
         mock_api.rename_droplet.assert_called_once_with(12345, "new-name")
         mock_remove_ssh.assert_called_once()
         mock_add_ssh.assert_called_once()
+        assert mock_add_ssh.call_args.kwargs["known_hosts"] == known_hosts_path(
+            "~/.ssh/config", 12345
+        )
 
     @patch("dropkit.main.find_user_droplet")
     @patch("dropkit.main.load_config_and_api")

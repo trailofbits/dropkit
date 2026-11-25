@@ -6,8 +6,9 @@ import shutil
 import subprocess
 import sys
 import time
+from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 from urllib.parse import urlparse
 
 import typer
@@ -26,6 +27,14 @@ from dropkit.ssh_config import (
     host_exists,
     remove_known_hosts_entry,
     remove_ssh_host,
+)
+from dropkit.ssh_host_keys import (
+    SSHConnection,
+    copy_host_key,
+    has_host_key,
+    import_host_key,
+    known_hosts_path,
+    snapshot_known_hosts_path,
 )
 from dropkit.ui import (
     display_images,
@@ -277,6 +286,16 @@ def get_ssh_hostname(droplet_name: str) -> str:
     return f"dropkit.{droplet_name}"
 
 
+def require_ssh_pin(ssh: SSHConnection, droplet_name: str) -> None:
+    if not has_host_key(ssh.known_hosts):
+        console.print(f"[red]No SSH host key enrolled for {ssh.hostname}.[/red]")
+        console.print(
+            f"Verify the host key independently, then run: "
+            f"dropkit config-ssh {droplet_name} --host-key PATH"
+        )
+        raise typer.Exit(1)
+
+
 def get_snapshot_name(droplet_name: str) -> str:
     """
     Convert droplet name to snapshot name.
@@ -350,7 +369,7 @@ def ensure_ssh_config(
     droplet_name: str,
     username: str,
     config: DropkitConfig,
-) -> str:
+) -> SSHConnection:
     """
     Ensure SSH config entry exists for a droplet.
 
@@ -364,12 +383,14 @@ def ensure_ssh_config(
         config: DropkitConfig instance with SSH settings
 
     Returns:
-        SSH hostname (e.g., "dropkit.my-droplet")
+        SSH connection for the droplet
 
     Raises:
         ValueError: If droplet has no public IP
     """
     ssh_hostname = get_ssh_hostname(droplet_name)
+    ssh = SSHConnection(ssh_hostname, config.ssh.config_path, droplet["id"])
+    require_ssh_pin(ssh, droplet_name)
 
     if not host_exists(config.ssh.config_path, ssh_hostname):
         # Get public IP from droplet networks
@@ -390,10 +411,11 @@ def ensure_ssh_config(
             hostname=public_ip,
             user=username,
             identity_file=config.ssh.identity_file,
+            known_hosts=ssh.known_hosts,
         )
         console.print(f"[green]✓[/green] Added SSH config: {ssh_hostname} -> {public_ip}")
 
-    return ssh_hostname
+    return ssh
 
 
 def cleanup_ssh_entries(
@@ -648,7 +670,7 @@ def register_ssh_keys_with_do(api: DigitalOceanAPI) -> tuple[list[str], list[int
     return ssh_keys, ssh_key_ids, username
 
 
-def wait_for_cloud_init(ssh_hostname: str, verbose: bool = False) -> tuple[bool, bool]:
+def wait_for_cloud_init(ssh: SSHConnection, verbose: bool = False) -> tuple[bool, bool]:
     """
     Wait for cloud-init to complete on a droplet via SSH.
 
@@ -656,7 +678,7 @@ def wait_for_cloud_init(ssh_hostname: str, verbose: bool = False) -> tuple[bool,
     It waits up to 10 minutes for cloud-init to complete.
 
     Args:
-        ssh_hostname: SSH hostname to connect to (e.g., "dropkit.my-droplet")
+        ssh: Connection to the fresh droplet returned by create
         verbose: If True, show debug output
 
     Returns:
@@ -666,7 +688,7 @@ def wait_for_cloud_init(ssh_hostname: str, verbose: bool = False) -> tuple[bool,
         - Both False if timeout occurred
 
     Raises:
-        None - errors are handled internally and reported to console
+        typer.Exit: If Dropkit cannot establish the new droplet's SSH pin
     """
     console.print(
         f"[dim]Waiting for cloud-init to complete... (started {time.strftime('%H:%M:%S')})[/dim]"
@@ -679,6 +701,7 @@ def wait_for_cloud_init(ssh_hostname: str, verbose: bool = False) -> tuple[bool,
     attempt = 0
     cloud_init_done = False
     cloud_init_error = False
+    enrolled = False
 
     if verbose:
         console.print(
@@ -694,29 +717,36 @@ def wait_for_cloud_init(ssh_hostname: str, verbose: bool = False) -> tuple[bool,
 
     while attempt < max_attempts and not cloud_init_done:
         try:
-            # Use the SSH config hostname alias we just created
+            if not enrolled:
+                ssh.enroll()
+                enrolled = has_host_key(ssh.known_hosts)
+                if not enrolled:
+                    attempt += 1
+                    time.sleep(10)
+                    continue
+
             if verbose:
                 console.print(
                     f"[dim][DEBUG] Attempt {attempt + 1}/{max_attempts}: Checking cloud-init status via SSH...[/dim]"
                 )
 
             result = subprocess.run(
-                [
-                    "ssh",
-                    "-o",
-                    "StrictHostKeyChecking=no",
-                    "-o",
-                    "UserKnownHostsFile=/dev/null",
-                    "-o",
-                    "ConnectTimeout=5",
-                    "-o",
-                    "BatchMode=yes",
-                    ssh_hostname,  # Use hostname alias from SSH config
-                    "sudo cloud-init status --format=json --wait",
-                ],
+                ssh.command("sudo cloud-init status --format=json --wait", 5),
                 capture_output=True,
                 timeout=30,
             )
+
+            # SSH uses 255 for a connection failure. cloud-init can emit
+            # valid JSON with other nonzero status codes.
+            if result.returncode == 255:
+                if b"Host key verification failed" in result.stderr:
+                    console.print(
+                        f"[red]SSH host key verification failed for {ssh.hostname}.[/red]"
+                    )
+                    raise typer.Exit(1)
+                attempt += 1
+                time.sleep(10)
+                continue
 
             if verbose:
                 console.print(f"[dim][DEBUG] SSH return code: {result.returncode}[/dim]")
@@ -768,12 +798,12 @@ def wait_for_cloud_init(ssh_hostname: str, verbose: bool = False) -> tuple[bool,
                         "\n[yellow]The droplet is running but cloud-init failed.[/yellow]"
                     )
                     console.print("[yellow]You can investigate by running:[/yellow]")
-                    console.print(f"  [cyan]ssh {ssh_hostname} 'sudo cloud-init status'[/cyan]")
+                    console.print(f"  [cyan]ssh {ssh.hostname} 'sudo cloud-init status'[/cyan]")
                     console.print(
-                        f"  [cyan]ssh {ssh_hostname} 'sudo cat /var/log/cloud-init.log'[/cyan]"
+                        f"  [cyan]ssh {ssh.hostname} 'sudo cat /var/log/cloud-init.log'[/cyan]"
                     )
                     console.print(
-                        f"  [cyan]ssh {ssh_hostname} 'sudo cat /var/log/cloud-init-output.log'[/cyan]"
+                        f"  [cyan]ssh {ssh.hostname} 'sudo cat /var/log/cloud-init-output.log'[/cyan]"
                     )
 
                     # Break out of the loop - no point continuing
@@ -801,13 +831,21 @@ def wait_for_cloud_init(ssh_hostname: str, verbose: bool = False) -> tuple[bool,
                 )
             attempt += 1
             time.sleep(10)
+        except OSError as e:
+            console.print(f"[red]Could not save or use the SSH host key: {e}[/red]")
+            raise typer.Exit(1) from e
 
     if not cloud_init_done and not cloud_init_error:
+        if not has_host_key(ssh.known_hosts):
+            console.print(
+                f"[red]Droplet created, but could not enroll the SSH host key for {ssh.hostname}.[/red]"
+            )
+            raise typer.Exit(1)
         console.print(
             "[yellow]⚠[/yellow] Cloud-init status check timed out, but droplet may still be initializing"
         )
         console.print(
-            f"[yellow]⚠[/yellow] You can check status manually with: ssh {ssh_hostname} 'cloud-init status'"
+            f"[yellow]⚠[/yellow] You can check status manually with: ssh {ssh.hostname} 'cloud-init status'"
         )
 
     return cloud_init_done, cloud_init_error
@@ -862,12 +900,12 @@ def check_local_tailscale() -> bool:
         return False
 
 
-def run_tailscale_up(ssh_hostname: str, verbose: bool = False) -> str | None:
+def run_tailscale_up(ssh: SSHConnection, verbose: bool = False) -> str | None:
     """
     Run 'tailscale up' on the droplet and extract the auth URL.
 
     Args:
-        ssh_hostname: SSH hostname to connect to
+        ssh: SSH connection to the droplet
         verbose: Show debug output
 
     Returns:
@@ -882,21 +920,13 @@ def run_tailscale_up(ssh_hostname: str, verbose: bool = False) -> str | None:
         # to kill it after 5 seconds - the auth URL is printed immediately.
         # The `|| true` ensures we don't fail due to timeout's exit code.
         result = subprocess.run(
-            [
-                "ssh",
-                "-o",
-                "StrictHostKeyChecking=no",
-                "-o",
-                "UserKnownHostsFile=/dev/null",
-                "-o",
-                "ConnectTimeout=10",
-                ssh_hostname,
-                "timeout 5 sudo tailscale up 2>&1 || true",
-            ],
+            ssh.command("timeout 5 sudo tailscale up 2>&1 || true", 10),
             capture_output=True,
             timeout=30,
         )
 
+        if result.returncode != 0:
+            return None
         output = result.stdout.decode("utf-8", errors="ignore")
 
         if verbose:
@@ -923,7 +953,7 @@ def run_tailscale_up(ssh_hostname: str, verbose: bool = False) -> str | None:
         return None
 
 
-def tailscale_logout(ssh_hostname: str, verbose: bool = False) -> bool:
+def tailscale_logout(ssh: SSHConnection, verbose: bool = False) -> bool:
     """
     Logout from Tailscale on a droplet before destroy/hibernate.
 
@@ -931,7 +961,7 @@ def tailscale_logout(ssh_hostname: str, verbose: bool = False) -> bool:
     stale entries from accumulating.
 
     Args:
-        ssh_hostname: SSH hostname to connect to
+        ssh: SSH connection to the droplet
         verbose: Show debug output
 
     Returns:
@@ -942,17 +972,7 @@ def tailscale_logout(ssh_hostname: str, verbose: bool = False) -> bool:
 
     try:
         result = subprocess.run(
-            [
-                "ssh",
-                "-o",
-                "StrictHostKeyChecking=no",
-                "-o",
-                "UserKnownHostsFile=/dev/null",
-                "-o",
-                "ConnectTimeout=10",
-                ssh_hostname,
-                "sudo tailscale logout",
-            ],
+            ssh.command("sudo tailscale logout", 10),
             capture_output=True,
             timeout=30,
         )
@@ -1028,7 +1048,7 @@ def is_droplet_tailscale_locked(config: DropkitConfig, droplet_name: str) -> boo
     return is_tailscale_ip(current_ip)
 
 
-def add_temporary_ssh_rule(ssh_hostname: str, verbose: bool = False) -> bool:
+def add_temporary_ssh_rule(ssh: SSHConnection, verbose: bool = False) -> bool:
     """
     Add temporary UFW rule to allow SSH on public interface (eth0).
 
@@ -1037,21 +1057,13 @@ def add_temporary_ssh_rule(ssh_hostname: str, verbose: bool = False) -> bool:
     accessed after wake (before Tailscale re-authentication).
 
     Args:
-        ssh_hostname: SSH hostname to connect to
+        ssh: SSH connection to the droplet
         verbose: Show debug output
 
     Returns:
         True on success, False on failure
     """
-    cmd = [
-        "ssh",
-        "-o",
-        "StrictHostKeyChecking=no",
-        "-o",
-        "ConnectTimeout=10",
-        ssh_hostname,
-        "sudo ufw allow in on eth0 to any port 22",
-    ]
+    cmd = ssh.command("sudo ufw allow in on eth0 to any port 22", 10)
 
     if verbose:
         console.print(f"[dim]Running: {' '.join(cmd)}[/dim]")
@@ -1102,10 +1114,11 @@ def prepare_for_hibernate(
     console.print("[dim]Detected Tailscale lockdown - preparing for hibernate...[/dim]")
 
     ssh_hostname = get_ssh_hostname(droplet_name)
+    ssh = SSHConnection(ssh_hostname, config.ssh.config_path, droplet["id"])
 
     # Add temporary SSH rule via Tailscale connection (must succeed before logout)
     console.print("[dim]Adding temporary SSH rule for eth0...[/dim]")
-    if not add_temporary_ssh_rule(ssh_hostname, verbose):
+    if not add_temporary_ssh_rule(ssh, verbose):
         # Temp rule failed - abort logout to keep Tailscale connectivity
         console.print(
             "[yellow]⚠[/yellow] Could not add temporary SSH rule - "
@@ -1138,6 +1151,7 @@ def prepare_for_hibernate(
                 hostname=public_ip,
                 user=username,
                 identity_file=config.ssh.identity_file,
+                known_hosts=ssh.known_hosts,
             )
             console.print("[green]✓[/green] SSH config updated to public IP")
         except Exception as e:
@@ -1146,7 +1160,7 @@ def prepare_for_hibernate(
 
     # Now safe to logout from Tailscale (SSH config points to public IP)
     console.print("[dim]Logging out from Tailscale...[/dim]")
-    if tailscale_logout(ssh_hostname, verbose):
+    if tailscale_logout(replace(ssh, address=public_ip), verbose):
         console.print("[green]✓[/green] Logged out from Tailscale")
     else:
         console.print(
@@ -1157,7 +1171,7 @@ def prepare_for_hibernate(
     return True
 
 
-def get_tailscale_ip(ssh_hostname: str) -> str | None:
+def get_tailscale_ip(ssh: SSHConnection) -> str | None:
     """
     Get Tailscale IP address from a running droplet.
 
@@ -1166,30 +1180,20 @@ def get_tailscale_ip(ssh_hostname: str) -> str | None:
     or Tailscale is not running.
 
     Args:
-        ssh_hostname: SSH hostname to connect to
+        ssh: SSH connection to the droplet
 
     Returns:
         Tailscale IP address if found, None otherwise
     """
     try:
         result = subprocess.run(
-            [
-                "ssh",
-                "-o",
-                "StrictHostKeyChecking=no",
-                "-o",
-                "UserKnownHostsFile=/dev/null",
-                "-o",
-                "ConnectTimeout=5",
-                "-o",
-                "BatchMode=yes",
-                ssh_hostname,
-                "tailscale ip -4 2>/dev/null",
-            ],
+            ssh.command("tailscale ip -4 2>/dev/null", 5),
             capture_output=True,
             timeout=15,
         )
 
+        if result.returncode != 0:
+            return None
         output = result.stdout.decode("utf-8", errors="ignore").strip()
 
         # Validate it's a valid Tailscale CGNAT IP (100.64.0.0/10 range)
@@ -1203,7 +1207,7 @@ def get_tailscale_ip(ssh_hostname: str) -> str | None:
 
 
 def wait_for_tailscale_ip(
-    ssh_hostname: str,
+    ssh: SSHConnection,
     timeout: int = 300,
     poll_interval: int = 5,
     verbose: bool = False,
@@ -1212,7 +1216,7 @@ def wait_for_tailscale_ip(
     Poll for Tailscale IP address after user authenticates.
 
     Args:
-        ssh_hostname: SSH hostname to connect to
+        ssh: SSH connection to the droplet
         timeout: Maximum time to wait in seconds
         poll_interval: Time between polls in seconds
         verbose: Show debug output
@@ -1228,24 +1232,16 @@ def wait_for_tailscale_ip(
     while time.time() - start_time < timeout:
         try:
             result = subprocess.run(
-                [
-                    "ssh",
-                    "-o",
-                    "StrictHostKeyChecking=no",
-                    "-o",
-                    "UserKnownHostsFile=/dev/null",
-                    "-o",
-                    "ConnectTimeout=5",
-                    "-o",
-                    "BatchMode=yes",
-                    ssh_hostname,
-                    "tailscale ip -4 2>/dev/null",
-                ],
+                ssh.command("tailscale ip -4 2>/dev/null", 5),
                 capture_output=True,
                 timeout=15,
             )
 
-            output = result.stdout.decode("utf-8", errors="ignore").strip()
+            output = (
+                result.stdout.decode("utf-8", errors="ignore").strip()
+                if result.returncode == 0
+                else ""
+            )
 
             # Validate it's a valid Tailscale CGNAT IP (100.64.0.0/10 range)
             if output and is_tailscale_ip(output):
@@ -1267,7 +1263,7 @@ def wait_for_tailscale_ip(
     return None
 
 
-def lock_down_to_tailscale(ssh_hostname: str, verbose: bool = False) -> bool:
+def lock_down_to_tailscale(ssh: SSHConnection, verbose: bool = False) -> bool:
     """
     Lock down UFW to only allow traffic on the tailscale0 interface.
 
@@ -1275,7 +1271,7 @@ def lock_down_to_tailscale(ssh_hostname: str, verbose: bool = False) -> bool:
     on the Tailscale interface, effectively blocking all public access.
 
     Args:
-        ssh_hostname: SSH hostname to connect to (should use Tailscale IP now)
+        ssh: SSH connection to the droplet (should use Tailscale IP now)
         verbose: Show debug output
 
     Returns:
@@ -1297,17 +1293,7 @@ def lock_down_to_tailscale(ssh_hostname: str, verbose: bool = False) -> bool:
 
         for cmd, description in commands:
             result = subprocess.run(
-                [
-                    "ssh",
-                    "-o",
-                    "StrictHostKeyChecking=no",
-                    "-o",
-                    "UserKnownHostsFile=/dev/null",
-                    "-o",
-                    "ConnectTimeout=10",
-                    ssh_hostname,
-                    cmd,
-                ],
+                ssh.command(cmd, 10),
                 capture_output=True,
                 timeout=30,
             )
@@ -1333,18 +1319,14 @@ def lock_down_to_tailscale(ssh_hostname: str, verbose: bool = False) -> bool:
 
 
 def verify_tailscale_ssh(
-    tailscale_ip: str,
-    username: str,
-    identity_file: str,
+    ssh: SSHConnection,
     verbose: bool = False,
 ) -> bool:
     """
     Verify SSH access works via Tailscale IP.
 
     Args:
-        tailscale_ip: Tailscale IP address to connect to
-        username: SSH username
-        identity_file: SSH identity file path
+        ssh: Connection using the Tailscale address
         verbose: Show debug output
 
     Returns:
@@ -1352,21 +1334,7 @@ def verify_tailscale_ssh(
     """
     try:
         result = subprocess.run(
-            [
-                "ssh",
-                "-o",
-                "StrictHostKeyChecking=no",
-                "-o",
-                "UserKnownHostsFile=/dev/null",
-                "-o",
-                "ConnectTimeout=10",
-                "-o",
-                "BatchMode=yes",
-                "-i",
-                identity_file,
-                f"{username}@{tailscale_ip}",
-                "echo 'SSH via Tailscale working'",
-            ],
+            ssh.command("echo 'SSH via Tailscale working'", 10),
             capture_output=True,
             timeout=15,
         )
@@ -1382,12 +1350,12 @@ def verify_tailscale_ssh(
         return False
 
 
-def check_tailscale_installed(ssh_hostname: str, verbose: bool = False) -> bool:
+def check_tailscale_installed(ssh: SSHConnection, verbose: bool = False) -> bool:
     """
     Check if Tailscale is installed on a droplet.
 
     Args:
-        ssh_hostname: SSH hostname to connect to
+        ssh: SSH connection to the droplet
         verbose: Show debug output
 
     Returns:
@@ -1395,19 +1363,7 @@ def check_tailscale_installed(ssh_hostname: str, verbose: bool = False) -> bool:
     """
     try:
         result = subprocess.run(
-            [
-                "ssh",
-                "-o",
-                "StrictHostKeyChecking=no",
-                "-o",
-                "UserKnownHostsFile=/dev/null",
-                "-o",
-                "ConnectTimeout=10",
-                "-o",
-                "BatchMode=yes",
-                ssh_hostname,
-                "which tailscale",
-            ],
+            ssh.command("which tailscale", 10),
             capture_output=True,
             timeout=15,
         )
@@ -1421,14 +1377,14 @@ def check_tailscale_installed(ssh_hostname: str, verbose: bool = False) -> bool:
         return False
 
 
-def install_tailscale_on_droplet(ssh_hostname: str, verbose: bool = False) -> bool:
+def install_tailscale_on_droplet(ssh: SSHConnection, verbose: bool = False) -> bool:
     """
     Install Tailscale on a droplet via SSH.
 
     Uses the official Tailscale install script.
 
     Args:
-        ssh_hostname: SSH hostname to connect to
+        ssh: SSH connection to the droplet
         verbose: Show debug output
 
     Returns:
@@ -1439,17 +1395,7 @@ def install_tailscale_on_droplet(ssh_hostname: str, verbose: bool = False) -> bo
 
     try:
         result = subprocess.run(
-            [
-                "ssh",
-                "-o",
-                "StrictHostKeyChecking=no",
-                "-o",
-                "UserKnownHostsFile=/dev/null",
-                "-o",
-                "ConnectTimeout=10",
-                ssh_hostname,
-                "curl -fsSL https://tailscale.com/install.sh | sudo sh",
-            ],
+            ssh.command("curl -fsSL https://tailscale.com/install.sh | sudo sh", 10),
             capture_output=True,
             timeout=120,  # Installation may take a while
         )
@@ -1471,7 +1417,7 @@ def install_tailscale_on_droplet(ssh_hostname: str, verbose: bool = False) -> bo
 
 
 def setup_tailscale(
-    ssh_hostname: str,
+    ssh: SSHConnection,
     username: str,
     config: DropkitConfig,
     verbose: bool = False,
@@ -1487,7 +1433,7 @@ def setup_tailscale(
     5. Optionally lock down firewall to Tailscale only
 
     Args:
-        ssh_hostname: SSH hostname to connect to (e.g., "dropkit.my-droplet")
+        ssh: SSH connection to the droplet (e.g., "dropkit.my-droplet")
         username: Username for SSH config
         config: DropkitConfig instance with tailscale and ssh settings
         verbose: Show debug output
@@ -1498,16 +1444,14 @@ def setup_tailscale(
     console.print("\n[bold]Setting up Tailscale VPN[/bold]")
 
     # Run tailscale up and get auth URL
-    auth_url = run_tailscale_up(ssh_hostname, verbose)
+    auth_url = run_tailscale_up(ssh, verbose)
 
     if not auth_url:
         # No auth URL - could mean already authenticated or an error
         # Check if Tailscale is already connected by trying to get IP
         console.print("[dim]No authentication URL received, checking if already connected...[/dim]")
 
-        tailscale_ip = wait_for_tailscale_ip(
-            ssh_hostname, timeout=10, poll_interval=2, verbose=verbose
-        )
+        tailscale_ip = wait_for_tailscale_ip(ssh, timeout=10, poll_interval=2, verbose=verbose)
 
         if tailscale_ip:
             console.print(
@@ -1516,7 +1460,7 @@ def setup_tailscale(
         else:
             console.print("[yellow]⚠[/yellow] Could not connect to Tailscale")
             console.print("[dim]Tailscale is installed but not connected.[/dim]")
-            console.print(f"[dim]Connect later with: ssh {ssh_hostname} 'sudo tailscale up'[/dim]")
+            console.print(f"[dim]Connect later with: ssh {ssh.hostname} 'sudo tailscale up'[/dim]")
             return None
     else:
         # Normal flow: display auth URL and wait for user to authenticate
@@ -1527,7 +1471,7 @@ def setup_tailscale(
 
         # Poll for Tailscale IP
         tailscale_ip = wait_for_tailscale_ip(
-            ssh_hostname,
+            ssh,
             timeout=config.tailscale.auth_timeout,
             verbose=verbose,
         )
@@ -1535,23 +1479,30 @@ def setup_tailscale(
         if not tailscale_ip:
             console.print("[yellow]⚠[/yellow] Tailscale authentication timed out")
             console.print("[dim]You can authenticate later with:[/dim]")
-            console.print(f"[dim]  ssh {ssh_hostname} 'sudo tailscale up'[/dim]")
+            console.print(f"[dim]  ssh {ssh.hostname} 'sudo tailscale up'[/dim]")
             return None
 
         console.print(f"[green]✓[/green] Tailscale connected: [cyan]{tailscale_ip}[/cyan]")
+
+    tailscale_ssh = replace(ssh, address=tailscale_ip)
+    local_tailscale = check_local_tailscale() if config.tailscale.lock_down_firewall else False
+    if local_tailscale and not verify_tailscale_ssh(tailscale_ssh, verbose):
+        console.print("[yellow]⚠[/yellow] Could not verify pinned SSH over Tailscale.")
+        return None
 
     # Update SSH config with Tailscale IP
     console.print("[dim]Updating SSH config with Tailscale IP...[/dim]")
     try:
         add_ssh_host(
             config_path=config.ssh.config_path,
-            host_name=ssh_hostname,
+            host_name=ssh.hostname,
+            known_hosts=ssh.known_hosts,
             hostname=tailscale_ip,
             user=username,
             identity_file=config.ssh.identity_file,
         )
         console.print(
-            f"[green]✓[/green] Updated SSH config: [cyan]{ssh_hostname}[/cyan] -> {tailscale_ip}"
+            f"[green]✓[/green] Updated SSH config: [cyan]{ssh.hostname}[/cyan] -> {tailscale_ip}"
         )
     except OSError as e:
         console.print(f"[yellow]⚠[/yellow] Could not update SSH config: {e}")
@@ -1562,20 +1513,13 @@ def setup_tailscale(
 
     # Lock down firewall if configured
     if config.tailscale.lock_down_firewall:
-        if check_local_tailscale():
+        if local_tailscale:
             console.print("[dim]Locking down firewall to Tailscale only...[/dim]")
-            if lock_down_to_tailscale(ssh_hostname, verbose):
+            if lock_down_to_tailscale(tailscale_ssh, verbose):
                 console.print("[green]✓[/green] Firewall locked down to Tailscale")
             else:
                 console.print("[yellow]⚠[/yellow] Could not lock down firewall")
 
-            # Verify SSH via Tailscale
-            if verify_tailscale_ssh(tailscale_ip, username, config.ssh.identity_file, verbose):
-                console.print("[green]✓[/green] Verified SSH access via Tailscale")
-            else:
-                console.print(
-                    "[yellow]⚠[/yellow] SSH verification failed - you may need to wait a moment"
-                )
         else:
             reason = (
                 "not running — skipping firewall lockdown"
@@ -1587,7 +1531,7 @@ def setup_tailscale(
                 "[dim]Public SSH access remains available. Start Tailscale locally and run:[/dim]"
             )
             console.print(
-                f"[dim]  ssh {ssh_hostname} "
+                f"[dim]  ssh {ssh.hostname} "
                 "'sudo ufw --force reset && "
                 "sudo ufw allow in on tailscale0 && "
                 "sudo ufw default deny incoming && "
@@ -2230,6 +2174,14 @@ def create(
             cloud_init_error = False
         else:
             console.print(f"[green]✓[/green] IP address: [cyan]{ip_address}[/cyan]")
+            ssh = SSHConnection(
+                ssh_hostname,
+                config.ssh.config_path,
+                droplet_id,
+                address=ip_address,
+                user=username,
+                identity_file=config.ssh.identity_file,
+            )
             if verbose:
                 console.print(f"[dim][DEBUG] All v4 networks: {v4_networks}[/dim]")
 
@@ -2254,6 +2206,7 @@ def create(
                         hostname=ip_address,
                         user=username,
                         identity_file=config.ssh.identity_file,
+                        known_hosts=ssh.known_hosts,
                     )
                     console.print(
                         f"[green]✓[/green] Added SSH config: [cyan]ssh {ssh_hostname}[/cyan]"
@@ -2262,11 +2215,11 @@ def create(
                     console.print(f"[yellow]⚠[/yellow] Could not update SSH config: {e}")
 
             # Wait for cloud-init to complete using helper function
-            cloud_init_done, cloud_init_error = wait_for_cloud_init(ssh_hostname, verbose)
+            cloud_init_done, cloud_init_error = wait_for_cloud_init(ssh, verbose)
 
             # Tailscale setup (if enabled and cloud-init succeeded)
             if tailscale_enabled and cloud_init_done:
-                tailscale_ip = setup_tailscale(ssh_hostname, username, config, verbose)
+                tailscale_ip = setup_tailscale(ssh, username, config, verbose)
 
         # Show summary based on cloud-init and Tailscale status
         console.print()
@@ -2588,6 +2541,9 @@ def config_ssh(
     identity_file: str | None = typer.Option(
         None, "--identity-file", "-i", help="SSH identity file path"
     ),
+    host_key: Annotated[
+        Path | None, typer.Option("--host-key", help="Pin a verified SSH host public key file")
+    ] = None,
 ):
     """Configure SSH for an existing droplet."""
     try:
@@ -2622,7 +2578,17 @@ def config_ssh(
 
         # Check if already in SSH config
         ssh_hostname = get_ssh_hostname(droplet_name)
-        if host_exists(config.ssh.config_path, ssh_hostname):
+        ssh = SSHConnection(ssh_hostname, config.ssh.config_path, droplet["id"])
+        if host_key is not None:
+            # Import is explicit and usable in automation. Retain the route
+            # to a machine that may already have public SSH disabled.
+            current_ip = get_ssh_host_ip(config.ssh.config_path, ssh_hostname)
+            if current_ip and is_tailscale_ip(current_ip):
+                ip_address = current_ip
+            import_host_key(host_key, ssh.known_hosts)
+            user = user or username
+            identity_file = identity_file or config.ssh.identity_file
+        elif host_exists(config.ssh.config_path, ssh_hostname):
             console.print(
                 f"[yellow]⚠[/yellow] SSH config entry for '{ssh_hostname}' already exists"
             )
@@ -2659,15 +2625,17 @@ def config_ssh(
             hostname=ip_address,
             user=ssh_user,
             identity_file=identity_file,
+            known_hosts=ssh.known_hosts,
         )
 
         console.print(f"[green]✓[/green] SSH config updated for [cyan]{droplet_name}[/cyan]")
+        require_ssh_pin(ssh, droplet_name)
         console.print("\n[bold]Connect with:[/bold]")
         console.print(f"  [cyan]ssh {ssh_hostname}[/cyan]")
 
-    except DigitalOceanAPIError as e:
+    except (DigitalOceanAPIError, OSError, ValueError, subprocess.SubprocessError) as e:
         console.print(f"[red]Error: {e}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
 
 
 @app.command()
@@ -2947,6 +2915,7 @@ def destroy(droplet_name: str = typer.Argument(..., autocompletion=complete_drop
 
         # Get Tailscale IP before destroying (for known_hosts cleanup)
         ssh_hostname = get_ssh_hostname(droplet_name)
+        ssh = SSHConnection(ssh_hostname, config.ssh.config_path, droplet_id)
         droplet_tailscale_ip = None
         tailscale_locked = is_droplet_tailscale_locked(config, droplet_name)
 
@@ -2957,7 +2926,7 @@ def destroy(droplet_name: str = typer.Argument(..., autocompletion=complete_drop
             # Add temporary SSH rule so we can reach the droplet via public IP
             console.print()
             console.print("[dim]Adding temporary SSH rule for eth0...[/dim]")
-            if not add_temporary_ssh_rule(ssh_hostname):
+            if not add_temporary_ssh_rule(ssh):
                 console.print(
                     "[yellow]⚠[/yellow] Could not add temporary SSH rule - "
                     "skipping Tailscale logout to maintain connectivity"
@@ -2976,13 +2945,14 @@ def destroy(droplet_name: str = typer.Argument(..., autocompletion=complete_drop
                             hostname=droplet_public_ip,
                             user=username,
                             identity_file=config.ssh.identity_file,
+                            known_hosts=ssh.known_hosts,
                         )
                     except Exception:
                         pass
 
                 # Now safe to logout from Tailscale
                 console.print("[dim]Logging out from Tailscale...[/dim]")
-                if tailscale_logout(ssh_hostname):
+                if tailscale_logout(replace(ssh, address=droplet_public_ip)):
                     console.print("[green]✓[/green] Logged out from Tailscale")
                 else:
                     console.print(
@@ -2992,7 +2962,7 @@ def destroy(droplet_name: str = typer.Argument(..., autocompletion=complete_drop
         else:
             # SSH config has public IP, try to get Tailscale IP via SSH
             console.print("[dim]Checking for Tailscale IP...[/dim]")
-            droplet_tailscale_ip = get_tailscale_ip(ssh_hostname)
+            droplet_tailscale_ip = get_tailscale_ip(ssh)
             if droplet_tailscale_ip:
                 console.print(f"[dim]Found Tailscale IP: {droplet_tailscale_ip}[/dim]")
 
@@ -3086,6 +3056,17 @@ def _complete_hibernate(
     if snapshot:
         snapshot_id = snapshot.get("id")
         if snapshot_id:
+            try:
+                copy_host_key(
+                    known_hosts_path(config.ssh.config_path, droplet_id),
+                    snapshot_known_hosts_path(config.ssh.config_path, snapshot_id),
+                )
+            except (OSError, ValueError) as e:
+                console.print(f"[red]Could not save the snapshot's SSH host key: {e}[/red]")
+                console.print(
+                    "Droplet and snapshot kept. Fix the error, then rerun hibernate --continue."
+                )
+                raise typer.Exit(1) from e
             try:
                 api.create_tag(user_tag)
                 api.tag_resource(user_tag, str(snapshot_id), "image")
@@ -3448,6 +3429,9 @@ def rename(
         if host_exists(config.ssh.config_path, old_ssh_hostname):
             try:
                 # Remove old SSH entry
+                current_ip = get_ssh_host_ip(config.ssh.config_path, old_ssh_hostname)
+                if current_ip and is_tailscale_ip(current_ip):
+                    ip_address = current_ip
                 remove_ssh_host(config.ssh.config_path, old_ssh_hostname)
                 console.print(
                     f"[green]✓[/green] Removed old SSH config entry: [dim]{old_ssh_hostname}[/dim]"
@@ -3461,6 +3445,7 @@ def rename(
                         hostname=ip_address,
                         user=username,
                         identity_file=config.ssh.identity_file,
+                        known_hosts=known_hosts_path(config.ssh.config_path, droplet_id),
                     )
                     console.print(
                         f"[green]✓[/green] Added new SSH config entry: [cyan]{new_ssh_hostname}[/cyan]"
@@ -4053,7 +4038,9 @@ def hibernate(
         else:
             # SSH config has public IP, try to get Tailscale IP via SSH
             console.print("[dim]Checking for Tailscale IP...[/dim]")
-            droplet_tailscale_ip = get_tailscale_ip(ssh_hostname)
+            droplet_tailscale_ip = get_tailscale_ip(
+                SSHConnection(ssh_hostname, config.ssh.config_path, droplet_id)
+            )
             if droplet_tailscale_ip:
                 console.print(f"[dim]Found Tailscale IP: {droplet_tailscale_ip}[/dim]")
 
@@ -4415,11 +4402,21 @@ def wake(
             console.print(f"[dim]Retry setup: dropkit wake {droplet_name}[/dim]")
             raise typer.Exit(1)
 
+        ssh_hostname = get_ssh_hostname(droplet_name)
+        ssh = SSHConnection(ssh_hostname, config.ssh.config_path, droplet_id)
+        try:
+            copy_host_key(
+                snapshot_known_hosts_path(config.ssh.config_path, snapshot_id), ssh.known_hosts
+            )
+        except (OSError, ValueError) as e:
+            console.print(f"[red]Could not restore the SSH host key: {e}[/red]")
+            console.print(f"Snapshot kept. Fix the error, then rerun: dropkit wake {droplet_name}")
+            raise typer.Exit(1) from e
+
         # Add SSH config entry
         if ip_address and config.ssh.auto_update:
             try:
                 console.print("[dim]Configuring SSH...[/dim]")
-                ssh_hostname = get_ssh_hostname(droplet_name)
                 if existing_droplet and is_droplet_tailscale_locked(config, droplet_name):
                     # A previous wake may have blocked public SSH before being interrupted.
                     console.print("[green]✓[/green] Preserved Tailscale SSH config")
@@ -4430,6 +4427,7 @@ def wake(
                         hostname=ip_address,
                         user=username,
                         identity_file=config.ssh.identity_file,
+                        known_hosts=ssh.known_hosts,
                     )
                     console.print("[green]✓[/green] SSH config updated")
             except Exception as e:
@@ -4442,7 +4440,6 @@ def wake(
 
         # Handle Tailscale re-setup if the original droplet had Tailscale lockdown
         if was_tailscale_locked and ip_address:
-            ssh_hostname = get_ssh_hostname(droplet_name)
             if no_tailscale:
                 console.print()
                 console.print("[yellow]⚠[/yellow] Original droplet had Tailscale lockdown enabled.")
@@ -4452,6 +4449,7 @@ def wake(
                     f"[cyan]dropkit enable-tailscale {droplet_name}[/cyan][/dim]"
                 )
             else:
+                require_ssh_pin(ssh, droplet_name)
                 console.print()
                 console.print(
                     "[dim]Original droplet had Tailscale lockdown - re-setting up Tailscale...[/dim]"
@@ -4461,7 +4459,7 @@ def wake(
                 time.sleep(10)
 
                 # Re-setup Tailscale (clean state from hibernate logout)
-                tailscale_ip = setup_tailscale(ssh_hostname, username, config)
+                tailscale_ip = setup_tailscale(ssh, username, config)
 
                 if not tailscale_ip:
                     console.print("[yellow]⚠[/yellow] Tailscale setup incomplete.")
@@ -4469,6 +4467,8 @@ def wake(
                         f"[dim]Complete setup later with: "
                         f"[cyan]dropkit enable-tailscale {droplet_name}[/cyan][/dim]"
                     )
+                    console.print("Snapshot kept.")
+                    raise typer.Exit(1)
 
         # Prompt to delete snapshot
         console.print()
@@ -4487,9 +4487,13 @@ def wake(
         # Summary
         console.print()
         console.print(f"[bold green]Droplet '{droplet_name}' is awake![/bold green]")
-        if ip_address:
-            ssh_hostname = get_ssh_hostname(droplet_name)
+        if has_host_key(ssh.known_hosts):
             console.print(f"Connect with: [cyan]ssh {ssh_hostname}[/cyan]")
+        else:
+            console.print(
+                f"Verify the host key independently, then run: "
+                f"dropkit config-ssh {droplet_name} --host-key PATH"
+            )
 
     except DigitalOceanAPIError as e:
         console.print(f"[red]Error: {e}[/red]")
@@ -4544,7 +4548,7 @@ def enable_tailscale(
 
         # Ensure SSH config exists for this droplet
         try:
-            ssh_hostname = ensure_ssh_config(droplet, droplet_name, username, config_manager.config)
+            ssh = ensure_ssh_config(droplet, droplet_name, username, config_manager.config)
         except ValueError as e:
             console.print(f"[red]Error: {e}[/red]")
             raise typer.Exit(1)
@@ -4559,15 +4563,15 @@ def enable_tailscale(
 
         # Check if Tailscale is already installed
         console.print("[dim]Checking if Tailscale is installed...[/dim]")
-        if check_tailscale_installed(ssh_hostname, verbose):
+        if check_tailscale_installed(ssh, verbose):
             console.print("[green]✓[/green] Tailscale is already installed")
         else:
             console.print("[dim]Installing Tailscale...[/dim]")
             with console.status("[cyan]Installing Tailscale (this may take a minute)...[/cyan]"):
-                if not install_tailscale_on_droplet(ssh_hostname, verbose):
+                if not install_tailscale_on_droplet(ssh, verbose):
                     console.print("[red]Error: Failed to install Tailscale[/red]")
                     console.print(
-                        f"[dim]Try manually: ssh {ssh_hostname} "
+                        f"[dim]Try manually: ssh {ssh.hostname} "
                         f"'curl -fsSL https://tailscale.com/install.sh | sudo sh'[/dim]"
                     )
                     raise typer.Exit(1)
@@ -4581,7 +4585,7 @@ def enable_tailscale(
 
         # Run the Tailscale setup flow
         tailscale_ip = setup_tailscale(
-            ssh_hostname=ssh_hostname,
+            ssh=ssh,
             username=username,
             config=config,
             verbose=verbose,
@@ -4590,12 +4594,12 @@ def enable_tailscale(
         if tailscale_ip:
             console.print()
             console.print(f"[bold green]Tailscale enabled on {droplet_name}![/bold green]")
-            console.print(f"Connect via: [cyan]ssh {ssh_hostname}[/cyan]")
+            console.print(f"Connect via: [cyan]ssh {ssh.hostname}[/cyan]")
         else:
             console.print()
             console.print(f"[yellow]Tailscale setup incomplete for {droplet_name}[/yellow]")
             console.print(
-                f"[dim]You can complete setup later: ssh {ssh_hostname} 'sudo tailscale up'[/dim]"
+                f"[dim]You can complete setup later: ssh {ssh.hostname} 'sudo tailscale up'[/dim]"
             )
 
     except DigitalOceanAPIError as e:

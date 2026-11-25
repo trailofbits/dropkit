@@ -79,6 +79,30 @@ The tool will:
 ssh dropkit.my-first-droplet
 ```
 
+### SSH host keys
+
+On `dropkit create`, Dropkit records the first SSH host key automatically using
+OpenSSH's `accept-new`. This keeps new droplets usable without a fingerprint
+prompt. The first connection trusts the key presented by the endpoint. Every
+remote command after enrollment requires the saved key, and a mismatch blocks SSH.
+
+Dropkit stores pins by DigitalOcean droplet ID in `dropkit_known_hosts/` next to
+the configured SSH config file. The same pin works after a rename or a switch
+between public and Tailscale IPs. Hibernate saves a copy for the snapshot, and
+wake restores that pin to the replacement droplet on the same client.
+
+For a droplet created before this change, a restore from a client without the
+snapshot pin, or an intentional host key rotation, verify the host public key
+independently (for example, from the DigitalOcean Recovery Console), then import
+the verified public key file:
+
+```bash
+dropkit config-ssh my-droplet --host-key /path/to/verified-ssh_host_ed25519_key.pub
+```
+
+This command replaces any existing pin for that droplet. Managed SSH aliases
+use the saved pin as well.
+
 Your user account is already set up with your SSH keys.
 
 ## Available Commands

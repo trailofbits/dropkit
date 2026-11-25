@@ -25,7 +25,7 @@ DROPLET_NAME="${DROPLET_NAME:-e2e-$(head -c4 /dev/urandom | od -An -tx1 | tr -d 
 SSH_HOSTNAME="dropkit.${DROPLET_NAME}"
 SSH_CONFIG="${HOME}/.ssh/config"
 SSH_TIMEOUT="${E2E_SSH_TIMEOUT:-10}"
-SSH_OPTS="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=${SSH_TIMEOUT} -o BatchMode=yes"
+SSH_OPTS="-o StrictHostKeyChecking=yes -o ConnectTimeout=${SSH_TIMEOUT} -o BatchMode=yes"
 
 # Randomized defaults — avoid hidden dependencies on specific slugs
 _REGIONS=(nyc3 sfo3 lon1)
