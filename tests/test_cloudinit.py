@@ -1,18 +1,81 @@
 """Tests for cloud-init template parsing and rendering."""
 
 import json
+from io import StringIO
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 import yaml
 from jinja2 import Template, TemplateSyntaxError
 from jsonschema import Draft4Validator
 
+from dropkit.cloudinit import render_cloud_init
 from dropkit.config import Config
+from tests.test_config import SSH_PUBLIC_KEY
 
 # Pinned to cloud-init 22.4.2 — the oldest version shipped by a
 # currently supported DigitalOcean image (Debian 12 bookworm).
 _SCHEMA_PATH = Path(__file__).parent / "data" / "schema-cloud-config-v1.json"
+
+
+def _render_key(template_path: Path, key: str) -> str:
+    return render_cloud_init(str(template_path), "testuser", "Test User", "test@example.com", [key])
+
+
+def test_render_cloud_init_uses_validated_file_content(tmp_path):
+    template = tmp_path / "cloud-init.yaml"
+    template.write_text("{{ ssh_keys[0] }}")
+    key_file = tmp_path / "id_ed25519.pub"
+    key_file.write_text(SSH_PUBLIC_KEY + "\n")
+    real_open = open
+    key_reads = 0
+
+    def changing_open(file, *args, **kwargs):
+        nonlocal key_reads
+        if str(file) == str(key_file):
+            key_reads += 1
+            return StringIO(SSH_PUBLIC_KEY if key_reads == 1 else "not a public key")
+        return real_open(file, *args, **kwargs)
+
+    with patch("builtins.open", side_effect=changing_open):
+        rendered = _render_key(template, str(key_file))
+
+    assert key_reads == 1
+    assert rendered == SSH_PUBLIC_KEY
+
+
+def test_render_cloud_init_accepts_inline_agent_key(tmp_path):
+    template = tmp_path / "cloud-init.yaml"
+    template.write_text("{{ ssh_keys[0] }}")
+
+    assert _render_key(template, SSH_PUBLIC_KEY) == SSH_PUBLIC_KEY
+
+
+@pytest.mark.parametrize(
+    ("filename", "content", "error"),
+    [
+        ("private-key", SSH_PUBLIC_KEY, "must be a public key"),
+        ("bad.pub", "not a public key", "does not appear to be a valid SSH public key"),
+        ("empty.pub", "", "SSH key file is empty"),
+    ],
+)
+def test_render_cloud_init_rejects_invalid_file(tmp_path, filename, content, error):
+    template = tmp_path / "cloud-init.yaml"
+    template.write_text("{{ ssh_keys[0] }}")
+    key_file = tmp_path / filename
+    key_file.write_text(content)
+
+    with pytest.raises(ValueError, match=error):
+        _render_key(template, str(key_file))
+
+
+def test_render_cloud_init_rejects_missing_file(tmp_path):
+    template = tmp_path / "cloud-init.yaml"
+    template.write_text("{{ ssh_keys[0] }}")
+
+    with pytest.raises(FileNotFoundError, match="SSH key not found"):
+        _render_key(template, str(tmp_path / "missing.pub"))
 
 
 @pytest.fixture(scope="module")

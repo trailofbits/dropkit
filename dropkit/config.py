@@ -298,7 +298,7 @@ class Config:
         return agent_keys
 
     @staticmethod
-    def validate_ssh_public_key(key_path_or_content: str) -> None:
+    def validate_ssh_public_key(key_path_or_content: str) -> str:
         """
         Validate that a value is a valid SSH public key.
 
@@ -307,6 +307,9 @@ class Config:
 
         Args:
             key_path_or_content: Path to SSH key file, or inline key content
+
+        Returns:
+            The validated public-key content read from the input
 
         Raises:
             ValueError: If the key is not a valid SSH public key
@@ -340,6 +343,7 @@ class Config:
             raise ValueError(f"SSH key file is empty: {key_path_or_content}")
 
         Config.compute_ssh_key_fingerprint(content)
+        return content
 
     @staticmethod
     def read_ssh_key_content(key_path_or_content: str) -> str:

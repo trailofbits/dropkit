@@ -23,7 +23,7 @@ def render_cloud_init(
         username: Username to create in the droplet
         full_name: Full name extracted from email (for git user.name)
         email: Email address from DigitalOcean account (for git user.email)
-        ssh_keys: List of SSH public key file paths
+        ssh_keys: List of SSH public key file paths or inline agent keys
         tailscale_enabled: Whether to install Tailscale VPN (default: True)
 
     Returns:
@@ -37,14 +37,8 @@ def render_cloud_init(
     with open(template_file) as f:
         template_content = f.read()
 
-    # Validate and read SSH key contents
-    ssh_key_contents = []
-    for key_path in ssh_keys:
-        # Validate it's a public key
-        Config.validate_ssh_public_key(key_path)
-        # Read the content
-        content = Config.read_ssh_key_content(key_path)
-        ssh_key_contents.append(content)
+    # Render the same contents that passed validation, without reopening key files.
+    ssh_key_contents = [Config.validate_ssh_public_key(key_path) for key_path in ssh_keys]
 
     # Render template with Jinja2
     template = Template(template_content)
