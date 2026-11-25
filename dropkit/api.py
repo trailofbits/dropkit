@@ -100,12 +100,15 @@ class DigitalOceanAPI:
         response = self._request("GET", "/account")
         return response.get("account", {})
 
-    def get_username(self) -> str:
+    def get_username(self, account: dict[str, Any] | None = None) -> str:
         """
         Get username from DigitalOcean account email.
 
-        Fetches the account information and sanitizes the email address
-        to create a valid Linux username.
+        Uses the supplied account information, or fetches it if omitted, and
+        sanitizes the email address to create a valid Linux username.
+
+        Args:
+            account: Account response already fetched from DigitalOcean, if available
 
         Returns:
             Sanitized username from DigitalOcean account
@@ -113,7 +116,8 @@ class DigitalOceanAPI:
         Raises:
             DigitalOceanAPIError: If account email cannot be fetched or is empty
         """
-        account = self.get_account()
+        if account is None:
+            account = self.get_account()
         email = account.get("email", "")
 
         if not email:

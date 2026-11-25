@@ -10,6 +10,22 @@ from dropkit.api import DigitalOceanAPI
 class TestDigitalOceanAPI:
     """Tests for DigitalOceanAPI class."""
 
+    def test_get_username_uses_supplied_account_without_fetching(self):
+        """A supplied account avoids a second API request."""
+        api = DigitalOceanAPI("fake-token")
+        with patch.object(api, "get_account") as get_account:
+            assert api.get_username({"email": "john.doe@example.com"}) == "john_doe"
+        get_account.assert_not_called()
+
+    def test_get_username_fetches_account_when_omitted(self):
+        """Existing callers still fetch account information."""
+        api = DigitalOceanAPI("fake-token")
+        with patch.object(
+            api, "get_account", return_value={"email": "jane@example.com"}
+        ) as get_account:
+            assert api.get_username() == "jane"
+        get_account.assert_called_once_with()
+
     def test_sanitize_email_for_username_trailofbits_backwards_compat(self):
         """Test backwards compatibility: trailofbits.com emails still work."""
         username = DigitalOceanAPI._sanitize_email_for_username("john.doe@trailofbits.com")
