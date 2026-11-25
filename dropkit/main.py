@@ -2040,7 +2040,7 @@ def create(
             console.print("[red]Error: No email found in DigitalOcean account[/red]")
             raise typer.Exit(1)
 
-        do_username = api.get_username()
+        do_username = api.get_username(account)
     except DigitalOceanAPIError as e:
         console.print(f"[red]Error fetching account info from DigitalOcean: {e}[/red]")
         raise typer.Exit(1)

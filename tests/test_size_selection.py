@@ -92,6 +92,8 @@ def test_interactive_size_filter_reaches_api(size_env, command, prefix):
     elif command == "create":
         env.api.create_droplet.assert_called_once()
         assert env.api.create_droplet.call_args.kwargs["size"] == "large"
+        env.api.get_account.assert_called_once_with()
+        env.api.get_username.assert_called_once_with(env.api.get_account.return_value)
     elif command == "resize_live":
         env.api.resize_droplet.assert_called_once_with(123, "large", disk=False)
     else:
