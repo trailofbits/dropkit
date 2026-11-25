@@ -44,6 +44,7 @@ def size_env(tmp_path):
     manager.config.defaults.size = "small"
     manager.config.defaults.project_id = None
     manager.config.ssh.auto_update = False
+    manager.config.ssh.config_path = str(tmp_path / "ssh_config")
     with ExitStack() as stack:
         stack.enter_context(patch("dropkit.lock.LOCK_FILE", tmp_path / "dropkit.lock"))
         stack.enter_context(patch("dropkit.main.Config", return_value=manager))

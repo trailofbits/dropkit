@@ -4,6 +4,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from dropkit.ssh_host_keys import host_key_options
+
 
 def _backup_config(config_file: Path) -> None:
     """
@@ -31,6 +33,8 @@ def add_ssh_host(
     hostname: str,
     user: str,
     identity_file: str | None = None,
+    *,
+    known_hosts: Path | None = None,
 ) -> None:
     """
     Add or update an SSH host entry in the SSH config file.
@@ -41,6 +45,7 @@ def add_ssh_host(
         hostname: IP address or hostname
         user: SSH username
         identity_file: Path to SSH private key (optional)
+        known_hosts: Dropkit host key file for this droplet
     """
     config_file = Path(config_path).expanduser()
 
@@ -90,12 +95,29 @@ def add_ssh_host(
     if identity_file:
         host_entry += f"    IdentityFile {identity_file}\n"
 
+    if known_hosts is not None:
+        for option, value in host_key_options(known_hosts).items():
+            host_entry += f"    {option} {value}\n"
+
     # Ensure existing content ends with newline before appending
     if existing_content and not existing_content.endswith("\n"):
         existing_content += "\n"
 
-    # Append new entry
-    new_content = existing_content + host_entry + "\n"
+    if known_hosts is not None and existing_content.strip():
+        # OpenSSH uses the first value it finds. Put managed policy before
+        # wildcard defaults and restore their scope for the original file.
+        first_directive = next(
+            (
+                line.strip().split()[0].lower()
+                for line in existing_content.splitlines()
+                if line.strip() and not line.lstrip().startswith("#")
+            ),
+            None,
+        )
+        scope = "Host *\n" if first_directive not in {None, "host", "match"} else ""
+        new_content = host_entry + "\n" + scope + existing_content
+    else:
+        new_content = existing_content + host_entry + "\n"
 
     # Write back to file
     with open(config_file, "w") as f:

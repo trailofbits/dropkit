@@ -10,6 +10,7 @@ from typer.testing import CliRunner
 from dropkit.api import DigitalOceanAPI, DigitalOceanAPIError, DropletWaitTimeoutError
 from dropkit.main import app, setup_tailscale
 from dropkit.ssh_config import add_ssh_host, get_ssh_host_ip
+from dropkit.ssh_host_keys import known_hosts_path, snapshot_known_hosts_path
 
 runner = CliRunner()
 
@@ -38,9 +39,14 @@ def wake_env(tmp_path):
         defaults=SimpleNamespace(extra_tags=[], size="s-8vcpu-16gb"),
         cloudinit=SimpleNamespace(ssh_key_ids=[789]),
         ssh=SimpleNamespace(
-            auto_update=True, config_path="unused", identity_file="~/.ssh/test_key"
+            auto_update=True,
+            config_path=str(tmp_path / "ssh_config"),
+            identity_file="~/.ssh/test_key",
         ),
     )
+    snapshot_pin = snapshot_known_hosts_path(config.ssh.config_path, snapshot["id"])
+    snapshot_pin.parent.mkdir()
+    snapshot_pin.write_text("test snapshot pin\n")
     with ExitStack() as stack:
         stack.enter_context(patch("dropkit.lock.LOCK_FILE", tmp_path / "dropkit.lock"))
         stack.enter_context(
@@ -85,14 +91,16 @@ def test_timeout_then_retry_finishes_same_droplet(wake_env):
     assert result.exit_code == 0, result.output
     assert "Resuming wake" in result.output
     assert "ssh dropkit.test-droplet" in result.output
+    assert known_hosts_path(env.config.ssh.config_path, 123).read_text() == "test snapshot pin\n"
     env.api.create_droplet_from_snapshot.assert_called_once()
     env.api.wait_for_droplet_active.assert_called_with(123, timeout=900)
     env.ssh.assert_called_once_with(
-        config_path="unused",
+        config_path=env.config.ssh.config_path,
         host_name="dropkit.test-droplet",
         hostname="192.0.2.1",
         user="testuser",
         identity_file="~/.ssh/test_key",
+        known_hosts=known_hosts_path(env.config.ssh.config_path, 123),
     )
     env.api.delete_snapshot.assert_not_called()
 
@@ -120,6 +128,19 @@ def test_resume_no_tailscale(wake_env):
     env.vpn.assert_not_called()
 
 
+def test_wake_keeps_snapshot_when_tailscale_needs_an_unavailable_pin(wake_env):
+    env = wake_env
+    env.snapshot["tags"].append("tailscale-lockdown")
+    snapshot_known_hosts_path(env.config.ssh.config_path, env.snapshot["id"]).unlink()
+
+    result = runner.invoke(app, ["wake", "test-droplet"])
+
+    assert result.exit_code == 1
+    assert "No SSH host key enrolled" in result.output
+    env.vpn.assert_not_called()
+    env.api.delete_snapshot.assert_not_called()
+
+
 @pytest.mark.parametrize("no_tailscale", [False, True])
 def test_retry_after_firewall_lockdown_preserves_tailscale_ssh(wake_env, tmp_path, no_tailscale):
     env = wake_env
@@ -133,13 +154,13 @@ def test_retry_after_firewall_lockdown_preserves_tailscale_ssh(wake_env, tmp_pat
 
     def connect(ssh_hostname, verbose):
         """Simulate an authenticated node that rejects public SSH after lockdown."""
-        address = get_ssh_host_ip(env.config.ssh.config_path, ssh_hostname)
+        address = get_ssh_host_ip(env.config.ssh.config_path, ssh_hostname.hostname)
         addresses.append(address)
         assert address == ("100.64.0.1" if locked else "192.0.2.1")
 
     def lockdown(ssh_hostname, verbose):
         nonlocal locked
-        assert get_ssh_host_ip(env.config.ssh.config_path, ssh_hostname) == "100.64.0.1"
+        assert ssh_hostname.address == "100.64.0.1"
         locked = True
         return True
 

@@ -19,6 +19,7 @@ from dropkit.main import (
     is_droplet_tailscale_locked,
     prepare_for_hibernate,
 )
+from dropkit.ssh_host_keys import SSHConnection
 
 
 class TestGetSnapshotName:
@@ -247,7 +248,9 @@ class TestAddTemporarySshRule:
         """Test successful SSH rule addition."""
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
-        result = add_temporary_ssh_rule("dropkit.myvm")
+        result = add_temporary_ssh_rule(
+            SSHConnection("dropkit.myvm", "/nonexistent/ssh_config", 123)
+        )
 
         assert result is True
         mock_run.assert_called_once()
@@ -260,7 +263,9 @@ class TestAddTemporarySshRule:
         """Test failed SSH rule addition."""
         mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="error")
 
-        result = add_temporary_ssh_rule("dropkit.myvm")
+        result = add_temporary_ssh_rule(
+            SSHConnection("dropkit.myvm", "/nonexistent/ssh_config", 123)
+        )
 
         assert result is False
 
@@ -271,7 +276,9 @@ class TestAddTemporarySshRule:
 
         mock_run.side_effect = subprocess.TimeoutExpired("ssh", 30)
 
-        result = add_temporary_ssh_rule("dropkit.myvm")
+        result = add_temporary_ssh_rule(
+            SSHConnection("dropkit.myvm", "/nonexistent/ssh_config", 123)
+        )
 
         assert result is False
 
@@ -291,7 +298,10 @@ class TestPrepareForHibernate:
         mock_config.ssh.config_path = temp_ssh_config
 
         mock_api = MagicMock()
-        mock_droplet = {"networks": {"v4": [{"type": "public", "ip_address": "192.168.1.100"}]}}
+        mock_droplet = {
+            "id": 123,
+            "networks": {"v4": [{"type": "public", "ip_address": "192.168.1.100"}]},
+        }
 
         result = prepare_for_hibernate(mock_config, mock_api, mock_droplet, "myvm")
 
@@ -317,7 +327,10 @@ class TestPrepareForHibernate:
         mock_api = MagicMock()
         mock_api.get_username.return_value = "testuser"
 
-        mock_droplet = {"networks": {"v4": [{"type": "public", "ip_address": "203.0.113.50"}]}}
+        mock_droplet = {
+            "id": 123,
+            "networks": {"v4": [{"type": "public", "ip_address": "203.0.113.50"}]},
+        }
 
         mock_add_temp_rule.return_value = True
         mock_logout.return_value = True
@@ -349,7 +362,10 @@ class TestPrepareForHibernate:
         mock_api = MagicMock()
         mock_api.get_username.return_value = "testuser"
 
-        mock_droplet = {"networks": {"v4": [{"type": "public", "ip_address": "203.0.113.50"}]}}
+        mock_droplet = {
+            "id": 123,
+            "networks": {"v4": [{"type": "public", "ip_address": "203.0.113.50"}]},
+        }
 
         mock_add_temp_rule.return_value = False  # Simulating failure
 
